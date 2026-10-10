@@ -1,0 +1,389 @@
+import { NextResponse } from "next/server";
+import { passwordMatches } from "@/lib/admin-auth";
+import { db } from "@/db";
+import {
+  categories,
+  inventoryLevels,
+  orderItems,
+  products,
+  sizeCharts,
+  variants,
+  type SizeChartColumn,
+  type SizeChartRow,
+} from "@/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { recordAudit } from "@/lib/audit";
+import { getActor } from "@/lib/session";
+import { getCategories, listProducts } from "@/lib/queries";
+
+export async function GET() {
+  const [cats, prods] = await Promise.all([getCategories(), listProducts()]);
+  const charts = await db.select().from(sizeCharts);
+  return NextResponse.json({
+    categories: cats.map((c) => ({
+      ...c,
+      chart: charts.find((ch) => ch.categoryId === c.id) ?? null,
+      productCount: prods.filter((p) => p.categoryId === c.id).length,
+    })),
+    products: prods,
+  });
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+export async function POST(req: Request) {
+  const actor = await getActor();
+  const body = await req.json();
+  const action = body.action as string;
+
+  /* ---------------- categorías ---------------- */
+  if (action === "create_category") {
+    const name = String(body.name ?? "").trim();
+    if (!name) return NextResponse.json({ ok: false, error: "El nombre es obligatorio." }, { status: 400 });
+    const slug = slugify(name);
+    const dupeCat = await db.select({ id: categories.id }).from(categories).where(eq(categories.slug, slug)).limit(1);
+    if (dupeCat.length > 0) {
+      return NextResponse.json({ ok: false, error: "Ya existe una categoría con ese nombre." }, { status: 409 });
+    }
+    const [cat] = await db
+      .insert(categories)
+      .values({
+        name,
+        slug,
+        description: String(body.description ?? ""),
+        imageUrl: String(body.imageUrl ?? ""),
+        sortOrder: 99,
+      })
+      .returning();
+
+    const inherit = Number(body.inheritFromCategoryId ?? 0);
+    let columns: SizeChartColumn[] = [{ key: "size", label: "Talla", type: "text", locked: true }];
+    let rows: SizeChartRow[] = [{ size: "U" }];
+    if (inherit) {
+      const [src] = await db.select().from(sizeCharts).where(eq(sizeCharts.categoryId, inherit)).limit(1);
+      if (src) {
+        columns = src.columns;
+        rows = src.rows;
+      }
+    }
+    await db.insert(sizeCharts).values({ categoryId: cat.id, unit: "cm", columns, rows, updatedBy: actor.name });
+    await recordAudit({
+      actor,
+      module: "productos",
+      entityType: "category",
+      entityId: cat.id,
+      action: "create",
+      summary: `${actor.name} creó la categoría «${name}» con su tabla de tallas.`,
+    });
+    return NextResponse.json({ ok: true, id: cat.id });
+  }
+
+  /* ---------------- tabla de tallas ---------------- */
+  if (action === "save_size_chart") {
+    if (!Array.isArray(body.rows) || !Array.isArray(body.columns)) {
+      return NextResponse.json({ ok: false, error: "Filas/columnas inválidas." }, { status: 400 });
+    }
+    const categoryId = Number(body.categoryId);
+    const columns = body.columns as SizeChartColumn[];
+    const rows = body.rows as SizeChartRow[];
+    const [current] = await db.select().from(sizeCharts).where(eq(sizeCharts.categoryId, categoryId)).limit(1);
+    if (!current) return NextResponse.json({ ok: false, error: "Categoría sin tabla." }, { status: 404 });
+
+    const oldSizes = current.rows.map((r) => String(r.size));
+    const newSizes = rows.map((r) => String(r.size));
+    const removed = oldSizes.filter((s) => !newSizes.includes(s));
+
+    // Bloqueo: no se puede quitar una talla con stock o con ventas históricas.
+    if (removed.length > 0) {
+      const prods = await db.select().from(products).where(eq(products.categoryId, categoryId));
+      const productIds = prods.map((p) => p.id);
+      if (productIds.length > 0) {
+        const vs = await db
+          .select({ id: variants.id, size: variants.size, stock: inventoryLevels.stocked })
+          .from(variants)
+          .leftJoin(inventoryLevels, eq(inventoryLevels.variantId, variants.id))
+          .where(and(inArray(variants.productId, productIds), inArray(variants.size, removed)));
+        const withStock = vs.filter((v) => (v.stock ?? 0) > 0);
+        const ids = vs.map((v) => v.id);
+        const sold = ids.length
+          ? await db.select({ id: orderItems.id }).from(orderItems).where(inArray(orderItems.variantId, ids))
+          : [];
+        if (withStock.length > 0 || sold.length > 0) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `No puedes eliminar la(s) talla(s) ${removed.join(", ")}: hay stock o pedidos históricos. Desactívala en su lugar.`,
+            },
+            { status: 409 },
+          );
+        }
+        // sin stock ni ventas → desactivar variantes
+        if (ids.length > 0) {
+          await db.update(variants).set({ active: false }).where(inArray(variants.id, ids));
+        }
+      }
+    }
+
+    await db
+      .update(sizeCharts)
+      .set({ columns, rows, unit: body.unit ?? current.unit, updatedBy: actor.name, updatedAt: new Date() })
+      .where(eq(sizeCharts.categoryId, categoryId));
+
+    // Batch: crear variantes faltantes en productos existentes
+    let created = 0;
+    if (body.backfillVariants) {
+      const prods = await db.select().from(products).where(eq(products.categoryId, categoryId));
+      for (const p of prods) {
+        const existing = await db.select().from(variants).where(eq(variants.productId, p.id));
+        for (const size of [...new Set(newSizes)]) {
+          if (existing.some((v) => v.size === size)) continue;
+          const [v] = await db
+            .insert(variants)
+            .values({
+              productId: p.id,
+              size,
+              sku: `${p.handle.toUpperCase().replace(/-/g, "")}-${size}`,
+            })
+            .returning();
+          await db.insert(inventoryLevels).values({ variantId: v.id, stocked: 0, threshold: 4 });
+          created++;
+        }
+      }
+    }
+
+    await recordAudit({
+      actor,
+      module: "productos",
+      entityType: "size_chart",
+      entityId: categoryId,
+      action: "update",
+      fieldChanged: "rows/columns",
+      oldValue: { sizes: oldSizes },
+      newValue: { sizes: newSizes, variantesCreadas: created },
+      summary: `${actor.name} actualizó la tabla de tallas de la categoría #${categoryId}${created ? ` y generó ${created} variantes nuevas` : ""}.`,
+    });
+    return NextResponse.json({ ok: true, createdVariants: created });
+  }
+
+  /* ---------------- productos ---------------- */
+  if (action === "create_product") {
+    const title = String(body.title ?? "").trim();
+    const categoryId = Number(body.categoryId);
+    const price = Number(body.priceCents ?? 0);
+    const images = (body.images as string[]) ?? [];
+    const sizes = (body.sizes as { size: string; stock: number }[]) ?? [];
+    const status = body.status === "published" ? "published" : "draft";
+
+    if (!title || !categoryId) {
+      return NextResponse.json({ ok: false, error: "Nombre y categoría son obligatorios." }, { status: 400 });
+    }
+    if (status === "published") {
+      if (price <= 0) return NextResponse.json({ ok: false, error: "Publicar exige precio mayor a 0." }, { status: 400 });
+      if (images.length === 0) return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 imagen." }, { status: 400 });
+      if (sizes.length === 0) return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
+    }
+
+    const handle = slugify(title);
+    const dupe = await db.select().from(products).where(eq(products.handle, handle)).limit(1);
+    if (dupe.length > 0) {
+      return NextResponse.json({ ok: false, error: "Ya existe un producto con ese nombre." }, { status: 409 });
+    }
+
+    const [prod] = await db
+      .insert(products)
+      .values({
+        title,
+        handle,
+        description: String(body.description ?? ""),
+        categoryId,
+        status,
+        priceCents: price,
+        compareAtCents: body.compareAtCents ? Number(body.compareAtCents) : null,
+        images,
+        tags: (body.tags as string[]) ?? [],
+      })
+      .returning();
+
+    for (const s of sizes) {
+      const [v] = await db
+        .insert(variants)
+        .values({
+          productId: prod.id,
+          size: s.size,
+          sku: `${handle.toUpperCase().replace(/-/g, "")}-${s.size}`,
+        })
+        .returning();
+      await db.insert(inventoryLevels).values({ variantId: v.id, stocked: Math.max(0, Number(s.stock) || 0), threshold: 4 });
+    }
+
+    await recordAudit({
+      actor,
+      module: "productos",
+      entityType: "product",
+      entityId: prod.id,
+      action: "create",
+      summary: `${actor.name} creó el producto «${title}» (${sizes.length} tallas) en estado ${status}.`,
+    });
+    return NextResponse.json({ ok: true, id: prod.id, handle });
+  }
+
+  if (action === "update_product") {
+    const id = Number(body.id);
+    const [prod] = await db.select().from(products).where(eq(products.id, id)).limit(1);
+    if (!prod) return NextResponse.json({ ok: false, error: "Producto no encontrado." }, { status: 404 });
+    const patch: Record<string, unknown> = {};
+    if (body.status) patch.status = body.status;
+    if (body.priceCents !== undefined) patch.priceCents = Number(body.priceCents);
+    if (body.title) patch.title = String(body.title);
+    await db.update(products).set(patch).where(eq(products.id, id));
+    await recordAudit({
+      actor,
+      module: "productos",
+      entityType: "product",
+      entityId: id,
+      action: "update",
+      oldValue: { status: prod.status, priceCents: prod.priceCents },
+      newValue: patch,
+      summary: `${actor.name} actualizó el producto «${prod.title}».`,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "delete_product") {
+    const id = Number(body.id);
+    const hard = Boolean(body.hard);
+    const [prod] = await db.select().from(products).where(eq(products.id, id)).limit(1);
+    if (!prod) return NextResponse.json({ ok: false, error: "Producto no encontrado." }, { status: 404 });
+
+    if (!hard) {
+      await db.update(products).set({ status: "archived" }).where(eq(products.id, id));
+      await recordAudit({
+        actor,
+        module: "productos",
+        entityType: "product",
+        entityId: id,
+        action: "delete_soft",
+        summary: `${actor.name} archivó el producto «${prod.title}».`,
+      });
+      return NextResponse.json({ ok: true, mode: "archived" });
+    }
+
+    if (!actor.canHardDelete) {
+      return NextResponse.json({ ok: false, error: "Tu rol no permite borrado definitivo." }, { status: 403 });
+    }
+    if (String(body.confirmText ?? "").trim() !== prod.title) {
+      return NextResponse.json({ ok: false, error: "El nombre escrito no coincide." }, { status: 400 });
+    }
+    if (!passwordMatches(body.password)) {
+      return NextResponse.json({ ok: false, error: "Reautenticación fallida." }, { status: 401 });
+    }
+
+    const vs = await db.select({ id: variants.id }).from(variants).where(eq(variants.productId, id));
+    const vIds = vs.map((v) => v.id);
+    const sold = vIds.length
+      ? await db.select({ id: orderItems.id }).from(orderItems).where(inArray(orderItems.variantId, vIds))
+      : [];
+    if (sold.length > 0) {
+      return NextResponse.json(
+        { ok: false, error: "Este producto tiene ventas históricas: solo puede archivarse." },
+        { status: 409 },
+      );
+    }
+
+    // audit ANTES del borrado físico
+    await recordAudit({
+      actor,
+      module: "productos",
+      entityType: "product",
+      entityId: id,
+      action: "delete_hard",
+      oldValue: { title: prod.title, handle: prod.handle },
+      summary: `${actor.name} eliminó definitivamente el producto «${prod.title}».`,
+    });
+    if (vIds.length > 0) {
+      await db.delete(inventoryLevels).where(inArray(inventoryLevels.variantId, vIds));
+      await db.delete(variants).where(inArray(variants.id, vIds));
+    }
+    await db.delete(products).where(eq(products.id, id));
+    return NextResponse.json({ ok: true, mode: "hard" });
+  }
+
+  if (action === "update_stock") {
+    const variantId = Number(body.variantId);
+    const value = Math.max(0, Number(body.stocked));
+    const [level] = await db
+      .select()
+      .from(inventoryLevels)
+      .where(eq(inventoryLevels.variantId, variantId))
+      .limit(1);
+    if (!level) return NextResponse.json({ ok: false, error: "Variante sin inventario." }, { status: 404 });
+    if (body.expectedUpdatedAt && new Date(body.expectedUpdatedAt).getTime() !== level.updatedAt.getTime()) {
+      return NextResponse.json(
+        { ok: false, error: "Otro usuario cambió este stock. Recarga la vista." },
+        { status: 409 },
+      );
+    }
+    await db
+      .update(inventoryLevels)
+      .set({ stocked: value, updatedAt: new Date() })
+      .where(eq(inventoryLevels.variantId, variantId));
+    await recordAudit({
+      actor,
+      module: "inventario",
+      entityType: "inventory_level",
+      entityId: variantId,
+      action: "update",
+      fieldChanged: "stocked",
+      oldValue: level.stocked,
+      newValue: value,
+      summary: `${actor.name} ajustó el stock de la variante #${variantId} de ${level.stocked} a ${value}.`,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "update_threshold") {
+    const variantId = Number(body.variantId);
+    const value = Math.max(0, Number(body.threshold));
+    const [level] = await db
+      .select()
+      .from(inventoryLevels)
+      .where(eq(inventoryLevels.variantId, variantId))
+      .limit(1);
+    if (!level) return NextResponse.json({ ok: false, error: "Variante sin inventario." }, { status: 404 });
+    if (body.expectedUpdatedAt && new Date(body.expectedUpdatedAt).getTime() !== level.updatedAt.getTime()) {
+      return NextResponse.json(
+        { ok: false, error: "Otro usuario cambió este umbral. Recarga la vista." },
+        { status: 409 },
+      );
+    }
+    await db
+      .update(inventoryLevels)
+      .set({ threshold: value, updatedAt: new Date() })
+      .where(eq(inventoryLevels.variantId, variantId));
+    await recordAudit({
+      actor,
+      module: "inventario",
+      entityType: "inventory_level",
+      entityId: variantId,
+      action: "update",
+      fieldChanged: "threshold",
+      newValue: value,
+      summary: `${actor.name} cambió el umbral de alerta de la variante #${variantId} a ${value}.`,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json({ ok: false, error: `Acción desconocida: ${action}` }, { status: 400 });
+}
+
+export async function HEAD() {
+  await db.select({ n: sql<number>`1` });
+  return new NextResponse(null, { status: 200 });
+}

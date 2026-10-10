@@ -1,0 +1,471 @@
+@import "tailwindcss";
+
+/* ============================================================
+   DOS SISTEMAS DE DISEÑO SEPARADOS
+   :root            → Storefront "Arena & Coral" (cálido, editorial)
+   .dash            → Dashboard  "Arena & Tinta" (cálido, consola densa v4)
+   Nunca se mezclan: cada superficie declara sus tokens propios.
+   ============================================================ */
+
+:root {
+  /* storefront */
+  --color-primary: #c9643c;
+  --color-accent: #e8a44a;
+  --color-surface-warm: #f5dfa0;
+  --color-surface-base: #faf3e4;
+  --color-ink: #241a10;
+  --color-ink-soft: #5a4a38;
+  --color-line: rgba(36, 26, 16, 0.12);
+
+  /* fallbacks heredados de v4 (ThemeVars los sobreescribe en runtime) */
+  --ct-primary: #c9643c;
+  --ct-accent: #e8a44a;
+  --ct-surface-warm: #f5dfa0;
+  --ct-surface-base: #faf3e4;
+
+  --font-playfair: "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-raleway: "Raleway", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+@theme inline {
+  --color-coral: var(--color-primary);
+  --color-amber: var(--color-accent);
+  --color-sand: var(--color-surface-warm);
+  --color-linen: var(--color-surface-base);
+  --color-terracotta: var(--color-primary);
+  --color-terracotta-dark: #a94e2b;
+  --color-amber-brand: var(--color-accent);
+  --color-sea: #2f6b5e;
+  --color-ink: #241a10;
+  --color-ink-soft: #5a4a38;
+  --font-display: var(--font-playfair);
+  --font-body: var(--font-raleway);
+}
+
+html,
+body {
+  background: var(--color-surface-base);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-raleway);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- Storefront ---------------- */
+
+.font-display {
+  font-family: var(--font-playfair);
+}
+
+.kicker {
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-primary);
+  color: #fff9ef;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 9999px;
+  padding: 0.8rem 1.9rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 6px 20px -8px color-mix(in srgb, var(--color-primary) 70%, transparent);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 86%, #241a10);
+  transform: translateY(-1px);
+}
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1.5px solid currentColor;
+  border-radius: 9999px;
+  padding: 0.72rem 1.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-size: 0.875rem;
+  transition: background 0.2s ease, color 0.2s ease;
+  cursor: pointer;
+  background: transparent;
+}
+.btn-ghost:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 9999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-quiet:hover { background: #fff; border-color: var(--color-primary); color: var(--color-primary); }
+
+.card {
+  background: #fffdf8;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+  border-radius: 1rem;
+}
+
+.input {
+  width: 100%;
+  border-radius: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 16%, transparent);
+  background: #fffdf8;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+  margin-bottom: 0.3rem;
+}
+
+.card-soft {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+}
+
+.hero-title {
+  font-family: var(--font-playfair);
+  font-style: italic;
+  line-height: 0.98;
+  letter-spacing: -0.015em;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.35);
+}
+
+.lift {
+  transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.5s ease;
+}
+.lift:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 26px 50px -30px rgba(46, 33, 27, 0.55);
+}
+
+.marquee-track {
+  display: flex;
+  gap: 3rem;
+  width: max-content;
+  animation: marquee 34s linear infinite;
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.floaty { animation: floaty 7s ease-in-out infinite; }
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: riseIn 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+/* -------- Animaciones de estética v4 -------- */
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.float-slow { animation: floatY 5s ease-in-out infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.5s ease both; }
+
+@keyframes heroWave {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes bubbleUp {
+  0% { transform: translateY(0) scale(1); opacity: 0; }
+  15% { opacity: 0.6; }
+  100% { transform: translateY(-120px) scale(1.2); opacity: 0; }
+}
+.bubble-up { animation: bubbleUp 6s ease-in infinite; }
+
+@keyframes drawerIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.drawer-in { animation: drawerIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.text-balance { text-wrap: balance; }
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-ink) 20%, transparent);
+  border-radius: 999px;
+  border: 3px solid var(--color-surface-base);
+}
+
+/* ============================================================
+   DASHBOARD — habla el mismo idioma que el concepto v4:
+   paleta terracota/ámbar/arena/lino/tinta, Playfair itálica,
+   pills y cards 1rem. Solo cambian los tokens, no la lógica.
+   ============================================================ */
+
+.dash {
+  --d-bg: #241a10;
+  --d-bg-soft: #17100a;
+  --d-panel: #fffdf8;
+  --d-panel-2: #f4ecdc;
+  --d-ink: #241a10;
+  --d-ink-soft: #5a4a38;
+  --d-line: #e5d9c3;
+  --d-accent: #c9643c;
+  --d-accent-soft: #f6e0cf;
+  --d-gold: #e8a44a;
+  --d-warn: #8a5a12;
+  --d-ok: #2f6b5e;
+  --d-danger: #b3261e;
+
+  background: var(--d-panel-2);
+  color: var(--d-ink);
+  font-family: var(--font-raleway);
+  font-weight: 400;
+}
+
+.dash .d-title {
+  font-family: var(--font-playfair);
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--d-ink);
+}
+
+.dash-panel {
+  background: var(--d-panel);
+  border: 1px solid var(--d-line);
+  border-radius: 1rem;
+}
+
+.dash-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--d-ink-soft);
+  font-weight: 700;
+  display: block;
+}
+
+.dash-input {
+  width: 100%;
+  border: 1px solid var(--d-line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+  color: var(--d-ink);
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.dash-input:focus {
+  border-color: var(--d-accent);
+  box-shadow: 0 0 0 3px rgba(201, 100, 60, 0.14);
+}
+.dash-input:disabled { background: var(--d-panel-2); }
+
+.dash-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--d-line);
+  background: #fff;
+  color: var(--d-ink);
+  transition: all 0.16s ease;
+  cursor: pointer;
+}
+.dash-btn:hover:not(:disabled) { border-color: var(--d-accent); color: var(--d-accent); }
+.dash-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.dash-btn-primary {
+  background: var(--d-accent);
+  border-color: var(--d-accent);
+  color: #fff;
+  box-shadow: 0 6px 16px -10px rgba(36, 26, 16, 0.85);
+}
+.dash-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--d-accent) 86%, #241a10);
+  border-color: color-mix(in srgb, var(--d-accent) 86%, #241a10);
+  color: #fff;
+}
+
+.dash-btn-danger { border-color: rgba(179, 38, 30, 0.35); color: var(--d-danger); background: #fff; }
+.dash-btn-danger:hover:not(:disabled) { background: #fdf0ee; border-color: var(--d-danger); color: var(--d-danger); }
+
+.dash-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 0.375rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dash-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; }
+.dash-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--d-panel-2);
+  border-bottom: 1px solid var(--d-line);
+  text-align: left;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--d-ink-soft);
+  font-weight: 700;
+  padding: 0.6rem 0.85rem;
+  white-space: nowrap;
+}
+.dash-table tbody td { border-bottom: 1px solid var(--d-line); padding: 0.55rem 0.85rem; vertical-align: middle; }
+.dash-table tbody tr:hover { background: #faf5ea; }
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.scroll-thin::-webkit-scrollbar { height: 9px; width: 9px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(36, 26, 16, 0.22); border-radius: 999px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+.dash-scroll { max-height: 62vh; overflow: auto; }
+
+@keyframes shimmer {
+  0% { background-position: -420px 0; }
+  100% { background-position: 420px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #f0e6d4 25%, #faf5ea 50%, #f0e6d4 75%);
+  background-size: 840px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 0.4rem;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.shake { animation: shake 0.3s ease 2; }
+
+.hero-wave { animation: heroWave 18s linear infinite; }
+.wave-slow { animation: heroWave 40s linear infinite; }
+.wave-fast { animation: heroWave 26s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track,
+  .floaty,
+  .float-slow,
+  .skeleton,
+  .rise,
+  .fade-up,
+  .bubble-up,
+  .hero-wave,
+  .wave-slow,
+  .wave-fast,
+  .shake {
+    animation: none !important;
+  }
+}
+
+/* ---------- Clases compartidas, reinterpretadas por superficie ---------- */
+
+/* Storefront (cálido) */
+.admin-input {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+  font-size: 0.875rem;
+  outline: none;
+}
+.admin-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(201, 100, 60, 0.12);
+}
+.admin-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-ink-soft);
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  display: block;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* Dashboard (consola cálida) — mismas clases, otro idioma visual */
+.dash .admin-input { border-radius: 0.5rem; padding: 0.5rem 0.7rem; font-size: 0.82rem; border-color: var(--d-line); color: var(--d-ink); }
+.dash .admin-input:focus { border-color: var(--d-accent); box-shadow: 0 0 0 3px rgba(201, 100, 60, 0.14); }
+.dash .admin-label { font-size: 0.66rem; letter-spacing: 0.14em; color: var(--d-ink-soft); font-weight: 700; margin-bottom: 0.25rem; }
+.dash .card-soft { background: var(--d-panel); border: 1px solid var(--d-line); border-radius: 0.75rem; }
+.dash .chip { border-radius: 0.375rem; padding: 0.12rem 0.45rem; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.dash .font-display { font-family: var(--font-playfair); font-style: normal; font-weight: 600; letter-spacing: -0.02em; }
+.dash .kicker { letter-spacing: 0.14em; font-size: 0.66rem; font-weight: 700; color: var(--d-accent); }
