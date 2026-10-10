@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const raw = (await cookies()).get("coralina_role")?.value;
   const role = await decodeRole(raw);
-  if (role !== "admin" && role !== "asesor") redirect("/");
+  if (role !== "admin" && role !== "asesor") redirect("/login");
   const actor = await getActor();
   return <AdminShell actor={actor}>{children}</AdminShell>;
 }
