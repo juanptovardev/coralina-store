@@ -9,6 +9,9 @@ export async function GET() {
   // rol inválido a "asesor", así que no sirve para detectar sesión ausente/embebida).
   const raw = (await cookies()).get("coralina_role")?.value;
   const role = await decodeRole(raw);
+  // Allowlist del rol (no truthiness): un cookie basura no debe verse como sesión.
+  // Nota: getActor() vuelve a decodificar el cookie a propósito (misma semántica que
+  // el gate middleware; si B6 cambia getActor() a fail-closed, borrar este guard).
   if (role !== "admin" && role !== "asesor") return NextResponse.json({ role: null });
   return NextResponse.json(await getActor());
 }

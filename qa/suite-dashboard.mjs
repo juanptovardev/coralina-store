@@ -2,6 +2,8 @@
 // Uso: node qa/suite-dashboard.mjs [baseUrl]   (default http://localhost:3006)
 // Requiere el server :3006 arriba y Postgres (docker coralina-postgres) accesible.
 // NO toca v4/v5. Los fixtures QA se crean con prefijo QA y se limpian al final.
+// Requiere SESSION_UNSIGNED=1 (cookies de rol PLANAS): con cookies firmadas los
+// asserts D0 de rol fallan (el cookie del jar no coincidiria con la firma HMAC).
 
 const BASE = process.argv[2] ?? "http://localhost:3006";
 const ADMIN_PASS = process.env.CORALINA_ADMIN_PASSWORD ?? "coralina";
@@ -16,9 +18,10 @@ function ok(name, cond, detail = "") {
 function wa(name, detail = "") { warn++; warnings.push(`${name}${detail ? " \u2014 " + detail : ""}`); console.log(`  \u26a0 ${name}${detail ? " \u2014 " + detail : ""}`); }
 function section(t) { console.log(`\n\u2014 ${t}`); }
 
-async function req(path, { method = "GET", body, role = "none" } = {}) {
+async function req(path, { method = "GET", body, role = "none", cookie } = {}) {
   const headers = {};
-  if (role && jar[role]) headers.Cookie = jar[role];
+  if (cookie) headers.Cookie = cookie;
+  else if (role && jar[role]) headers.Cookie = jar[role];
   if (body !== undefined) headers["content-type"] = "application/json";
   let res;
   try {
@@ -57,8 +60,10 @@ async function run() {
     ok("GET /api/admin/session sin cookie \u2192 role:null", sesGET.json?.role === null, http(sesGET));
     const sesAdmin = await g("/api/admin/session", "admin");
     ok("GET /api/admin/session con cookie admin \u2192 role admin", sesAdmin.json?.role === "admin", http(sesAdmin));
-    const sesGarbage = await fetch(BASE + "/api/admin/session", { headers: { Cookie: "coralina_role=hola" }, redirect: "manual" }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) })).catch(() => ({ status: 0, json: null }));
-    ok("GET /api/admin/session cookie basura \u2192 role:null", sesGarbage.json?.role === null, `HTTP ${sesGarbage.status}`);
+    const sesAsesor = await g("/api/admin/session", "asesor");
+    ok("GET /api/admin/session con cookie asesor \u2192 role asesor", sesAsesor.json?.role === "asesor", http(sesAsesor));
+    const sesGarbage = await req("/api/admin/session", { cookie: "coralina_role=hola" });
+    ok("GET /api/admin/session cookie basura \u2192 role:null", sesGarbage.json?.role === null, http(sesGarbage));
     const adminNoCookie = await req("/admin", { role: "none" });
     ok("GET /admin sin cookie \u2192 redirige (3xx)", adminNoCookie.status >= 300 && adminNoCookie.status < 400, http(adminNoCookie));
     const badRole = await post("/api/admin/session", { role: "bogus" }, "none");
