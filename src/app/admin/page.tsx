@@ -35,7 +35,7 @@ export default async function AdminHome() {
   ]);
   const board = await db.select().from(shipments);
 
-  // eslint-disable-next-line react-hooks/purity -- server component async: corre una vez por request; "hoy" compartido por hourAgo y las barras
+  // server component async: corre una vez por request; "hoy" compartido por hourAgo y las barras
   const now = Date.now();
   const hourAgo = (h: number) => new Date(now - h * 3600 * 1000);
   const lowStock = stock.reduce((a, s) => a + s.lowCount, 0);

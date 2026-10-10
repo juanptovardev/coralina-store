@@ -8,7 +8,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "bun qa/rate-limit.test.ts && bun qa/cart-input.test.ts && bun qa/session-sign.test.ts && bun qa/admin-auth.test.ts"
   },
