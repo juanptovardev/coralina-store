@@ -11,6 +11,7 @@ Tienda e-commerce (Next.js 16 · App Router) con **storefront** y **panel de adm
 ## Requisitos
 
 - Node.js 20+ y npm.
+- [Bun](https://bun.sh) 1+ — **solo para los tests** (`npm test` ejecuta `bun qa/*.test.ts`).
 - Un PostgreSQL (local o gestionado: Vercel Postgres/Neon, Supabase, etc.).
 
 ## Variables de entorno
@@ -38,7 +39,7 @@ npx drizzle-kit push        # crea/actualiza el esquema en DATABASE_URL
 npm run dev                 # http://localhost:3000
 ```
 
-Scripts: `npm run build` · `npm run start` · `npm run typecheck` · `npm run lint` · `npm test`.
+Scripts: `npm run build` · `npm run start` · `npm run typecheck` · `npm run lint` · `npm test` (requiere Bun).
 
 ## Deploy en Vercel
 

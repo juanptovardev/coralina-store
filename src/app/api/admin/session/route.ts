@@ -21,7 +21,9 @@ export async function POST(req: Request) {
   if (!body || (body.role !== "asesor" && body.role !== "admin")) {
     return NextResponse.json({ ok: false, error: "Rol inválido." }, { status: 400 });
   }
-  if (body.role === "admin" && !passwordMatches(body.password)) {
+  // Ambos roles exigen la clave: emitir una cookie de sesión desbloquea TODO
+  // /api/admin/* vía el gate, así que no se emite sin credencial (evita puerta trasera).
+  if (!passwordMatches(body.password)) {
     return NextResponse.json({ ok: false, error: "Reautenticación fallida." }, { status: 401 });
   }
   const role = body.role;

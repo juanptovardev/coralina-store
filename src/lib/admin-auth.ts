@@ -18,7 +18,10 @@ export function adminPassword(): string {
 export function passwordMatches(input: unknown): boolean {
   try {
     return String(input ?? "") === adminPassword();
-  } catch {
+  } catch (e) {
+    // Fail-closed: sin clave configurada en prod, TODO intento se deniega. Log para ops
+    // (distingue "clave incorrecta" de "app mal configurada").
+    console.error("[admin-auth] clave admin no disponible:", e);
     return false;
   }
 }
