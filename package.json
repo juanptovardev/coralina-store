@@ -2,7 +2,7 @@
   "name": "coralina-store-v6",
   "private": true,
   "engines": {
-    "bun": ">=1"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "next dev",
