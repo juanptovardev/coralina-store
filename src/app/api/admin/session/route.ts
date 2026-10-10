@@ -5,10 +5,11 @@ import { getActor } from "@/lib/session";
 import { clientIp, rateLimit, RATE_LIMIT_ERROR, RATE_LIMIT_RETRY_AFTER } from "@/lib/rate-limit";
 import { decodeRole, encodeRole } from "@/lib/session-sign";
 export async function GET() {
-  // Sin cookie válida devolvemos role:null (getActor() coacciona a "asesor",
-  // así que no sirve para detectar sesión ausente/embebida).
+  // Sin cookie de rol VÁLIDA devolvemos role:null (getActor() coacciona cualquier
+  // rol inválido a "asesor", así que no sirve para detectar sesión ausente/embebida).
   const raw = (await cookies()).get("coralina_role")?.value;
-  if (!(await decodeRole(raw))) return NextResponse.json({ role: null });
+  const role = await decodeRole(raw);
+  if (role !== "admin" && role !== "asesor") return NextResponse.json({ role: null });
   return NextResponse.json(await getActor());
 }
 

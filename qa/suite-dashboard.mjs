@@ -35,8 +35,8 @@ const post = (p, body, role = "admin") => req(p, { method: "POST", body, role })
 // Detector de error boundary: usamos los textos propios (error.tsx / global-error.tsx)
 // en vez de buscar "digest" — el payload RSC de Next incluye `"digest":"$undefined"`
 // en toda página y daría un falso positivo.
-const ERROR_MARKERS = ["mala pasada", "Algo salió mal", "Application error"];
-const noDigest = (r) =>
+const ERROR_MARKERS = ["mala pasada", "Algo salió mal", "La consola tuvo un problema", "Application error"];
+const noErrorMarker = (r) =>
   typeof r.text === "string" && !ERROR_MARKERS.some((m) => r.text.includes(m));
 const http = (r, extra = "") => `HTTP ${r.status}${r.err ? ` \u00b7 ${r.err}` : ""}${extra ? ` \u00b7 ${extra}` : ""}`;
 
@@ -54,6 +54,11 @@ async function run() {
     ok("POST /api/admin/orders con cookie admin \u2192 pasa el gate (no 401/403)", withCookie.status !== 401 && withCookie.status !== 403, http(withCookie));
     const sesGET = await g("/api/admin/session", "none");
     ok("GET /api/admin/session exento (200)", sesGET.status === 200, http(sesGET));
+    ok("GET /api/admin/session sin cookie \u2192 role:null", sesGET.json?.role === null, http(sesGET));
+    const sesAdmin = await g("/api/admin/session", "admin");
+    ok("GET /api/admin/session con cookie admin \u2192 role admin", sesAdmin.json?.role === "admin", http(sesAdmin));
+    const sesGarbage = await fetch(BASE + "/api/admin/session", { headers: { Cookie: "coralina_role=hola" }, redirect: "manual" }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) })).catch(() => ({ status: 0, json: null }));
+    ok("GET /api/admin/session cookie basura \u2192 role:null", sesGarbage.json?.role === null, `HTTP ${sesGarbage.status}`);
     const adminNoCookie = await req("/admin", { role: "none" });
     ok("GET /admin sin cookie \u2192 redirige (3xx)", adminNoCookie.status >= 300 && adminNoCookie.status < 400, http(adminNoCookie));
     const badRole = await post("/api/admin/session", { role: "bogus" }, "none");
@@ -73,7 +78,7 @@ async function run() {
     section("D1 \u00b7 /admin (Resumen / KPIs)");
     const home = await g("/admin", "admin");
     ok("/admin con cookie \u2192 200", home.status === 200, http(home));
-    ok("/admin sin error boundary (sin marcador digest)", noDigest(home), "digest presente");
+    ok("/admin sin error boundary (sin marcador digest)", noErrorMarker(home), "digest presente");
     const ordersRes = await g("/api/admin/orders", "admin");
     const orders = ordersRes.json?.orders ?? [];
     ok("GET /api/admin/orders \u2192 200 y lista", ordersRes.status === 200 && Array.isArray(orders), http(ordersRes));
@@ -83,7 +88,7 @@ async function run() {
     // ---------------- D2 · /admin/pedidos ----------------
     section("D2 \u00b7 /admin/pedidos (Pedidos + preview)");
     const pedPage = await g("/admin/pedidos", "admin");
-    ok("/admin/pedidos \u2192 200 sin digest", pedPage.status === 200 && noDigest(pedPage), http(pedPage));
+    ok("/admin/pedidos \u2192 200 sin digest", pedPage.status === 200 && noErrorMarker(pedPage), http(pedPage));
     if (fixtureVariantId != null) {
       const preview = await post("/api/admin/orders", { action: "preview_totals", items: [{ variantId: fixtureVariantId, quantity: 1 }] }, "admin");
       ok("preview_totals \u2192 200 con totales", preview.status === 200 && typeof preview.json?.totalCents === "number", http(preview));
@@ -156,7 +161,7 @@ async function run() {
     // ---------------- D3 · /admin/envios (kanban) ----------------
     section("D3 \u00b7 /admin/envios (Kanban / shipments)");
     const envPage = await g("/admin/envios", "admin");
-    ok("/admin/envios \u2192 200 sin digest", envPage.status === 200 && noDigest(envPage), http(envPage));
+    ok("/admin/envios \u2192 200 sin digest", envPage.status === 200 && noErrorMarker(envPage), http(envPage));
     const ships = await g("/api/admin/shipments", "admin");
     ok("GET /api/admin/shipments \u2192 200 y lista", ships.status === 200 && Array.isArray(ships.json?.shipments), http(ships));
     const badMove = await post("/api/admin/shipments", { action: "move", shipmentId: 0, status: "reparto" }, "admin");
@@ -172,11 +177,11 @@ async function run() {
     // ---------------- D4 · /admin/productos + /categorias + /inventario ----------------
     section("D4 \u00b7 Cat\u00e1logo: productos / categor\u00edas / inventario");
     const prodPage = await g("/admin/productos", "admin");
-    ok("/admin/productos \u2192 200 sin digest", prodPage.status === 200 && noDigest(prodPage), http(prodPage));
+    ok("/admin/productos \u2192 200 sin digest", prodPage.status === 200 && noErrorMarker(prodPage), http(prodPage));
     const catPage = await g("/admin/categorias", "admin");
-    ok("/admin/categorias \u2192 200 sin digest", catPage.status === 200 && noDigest(catPage), http(catPage));
+    ok("/admin/categorias \u2192 200 sin digest", catPage.status === 200 && noErrorMarker(catPage), http(catPage));
     const invPage = await g("/admin/inventario", "admin");
-    ok("/admin/inventario \u2192 200 sin digest", invPage.status === 200 && noDigest(invPage), http(invPage));
+    ok("/admin/inventario \u2192 200 sin digest", invPage.status === 200 && noErrorMarker(invPage), http(invPage));
     const cat = await g("/api/admin/catalog", "admin");
     ok("GET /api/admin/catalog \u2192 200 con products/categories", cat.status === 200 && Array.isArray(cat.json?.products) && Array.isArray(cat.json?.categories), http(cat));
     const inv = await g("/api/admin/inventory", "admin");
@@ -185,14 +190,14 @@ async function run() {
     // ---------------- D5 · /admin/clientes ----------------
     section("D5 \u00b7 /admin/clientes");
     const cliPage = await g("/admin/clientes", "admin");
-    ok("/admin/clientes \u2192 200 sin digest", cliPage.status === 200 && noDigest(cliPage), http(cliPage));
+    ok("/admin/clientes \u2192 200 sin digest", cliPage.status === 200 && noErrorMarker(cliPage), http(cliPage));
     const cli = await g("/api/admin/customers?page=1", "admin");
     ok("GET /api/admin/customers \u2192 200 con lista", cli.status === 200 && Array.isArray(cli.json?.customers ?? cli.json?.rows ?? cli.json?.data), http(cli, `keys=${Object.keys(cli.json ?? {}).join(",")}`));
 
     // ---------------- D6 · /admin/promos ----------------
     section("D6 \u00b7 /admin/promos");
     const proPage = await g("/admin/promos", "admin");
-    ok("/admin/promos \u2192 200 sin digest", proPage.status === 200 && noDigest(proPage), http(proPage));
+    ok("/admin/promos \u2192 200 sin digest", proPage.status === 200 && noErrorMarker(proPage), http(proPage));
     const promoName = `QA DASH ${stamp}`;
     if (fixtureCategoryId != null) {
       const createPromo = await post("/api/admin/promos", { action: "create", name: promoName, type: "category_percent", categoryIds: [fixtureCategoryId], percent: 10, priority: 99 }, "admin");
@@ -219,7 +224,7 @@ async function run() {
     // ---------------- D7 · /admin/auditoria ----------------
     section("D7 \u00b7 /admin/auditoria");
     const audPage = await g("/admin/auditoria", "admin");
-    ok("/admin/auditoria \u2192 200 sin digest", audPage.status === 200 && noDigest(audPage), http(audPage));
+    ok("/admin/auditoria \u2192 200 sin digest", audPage.status === 200 && noErrorMarker(audPage), http(audPage));
     const aud = await g("/api/admin/audit", "admin");
     ok("GET /api/admin/audit \u2192 200 con log", aud.status === 200 && Array.isArray(aud.json?.entries), http(aud));
     const csv = await g("/api/admin/audit?format=csv", "admin");
@@ -235,7 +240,7 @@ async function run() {
     // ---------------- D8 · /admin/diseno (editor home, ahora funcional) ----------------
     section("D8 \u00b7 /admin/diseno (editor de home)");
     const dPage = await g("/admin/diseno", "admin");
-    ok("/admin/diseno \u2192 200 sin digest", dPage.status === 200 && noDigest(dPage), http(dPage));
+    ok("/admin/diseno \u2192 200 sin digest", dPage.status === 200 && noErrorMarker(dPage), http(dPage));
     const design = await g("/api/admin/design", "admin");
     const layout = design.json?.layouts?.[0];
     ok("GET /api/admin/design \u2192 200 con layouts", design.status === 200 && Array.isArray(design.json?.layouts), http(design));
