@@ -22,14 +22,20 @@ const ENV = process.env as Record<string, string>;
 const savedNodeEnv = ENV.NODE_ENV;
 const savedSecret = ENV.CORALINA_SESSION_SECRET;
 const savedUnsigned = ENV.CORALINA_ALLOW_UNSIGNED;
+const savedAdminPass = ENV.CORALINA_ADMIN_PASSWORD;
 ENV.NODE_ENV = "development";
 delete ENV.CORALINA_SESSION_SECRET;
 delete ENV.CORALINA_ALLOW_UNSIGNED;
+delete ENV.CORALINA_ADMIN_PASSWORD; // getSecret() la usa como fallback → neutralizar para reproducibilidad
 
 const signed = await signRole("admin");
 ok("signRole produce <role>.<hmac>", /^admin\.[0-9a-f]{64}$/.test(signed));
 ok("verifyRole acepta la firma válida", (await verifyRole(signed)) === "admin");
-ok("verifyRole rechaza firma alterada", (await verifyRole(signed.slice(0, -1) + "0")) === null);
+const last = signed.at(-1) ?? "0";
+ok(
+  "verifyRole rechaza firma alterada",
+  (await verifyRole(signed.slice(0, -1) + (last === "0" ? "1" : "0"))) === null,
+);
 ok("verifyRole rechaza rol forjado", (await verifyRole("hacker." + signed.split(".")[1])) === null);
 ok("verifyRole rechaza sin separador", (await verifyRole("admin")) === null);
 ok("verifyRole rechaza vacío/undefined", (await verifyRole(undefined)) === null);
@@ -60,6 +66,8 @@ if (savedSecret === undefined) delete ENV.CORALINA_SESSION_SECRET;
 else ENV.CORALINA_SESSION_SECRET = savedSecret;
 if (savedUnsigned === undefined) delete ENV.CORALINA_ALLOW_UNSIGNED;
 else ENV.CORALINA_ALLOW_UNSIGNED = savedUnsigned;
+if (savedAdminPass === undefined) delete ENV.CORALINA_ADMIN_PASSWORD;
+else ENV.CORALINA_ADMIN_PASSWORD = savedAdminPass;
 
 console.log(`\nPASS ${pass} · FAIL ${fail}`);
 process.exitCode = fail > 0 ? 1 : 0;

@@ -5,14 +5,19 @@ import {
   orderItems,
   orders,
   products,
+  promotions,
   shipments,
   variants,
   type OperationalTag,
 } from "@/db/schema";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { canChangeTag } from "./domain";
 import { recordAudit } from "./audit";
 import { evaluateCart, type CartLine } from "./promo";
 import type { Actor } from "./session";
+
+/** Cliente de ejecución: el pool global (db) o la transacción en curso (tx). */
+type DbClient = Pick<typeof db, "select" | "insert" | "update">;
 
 export type OrderInputItem = { variantId: number; quantity: number };
 
@@ -72,8 +77,8 @@ async function nextDisplayId(): Promise<string> {
 }
 
 /** Descuenta stock de forma atómica; devuelve false si no alcanza (evita negativos). */
-async function decrementStock(variantId: number, qty: number): Promise<boolean> {
-  const res = await db
+async function decrementStock(variantId: number, qty: number, client: DbClient = db): Promise<boolean> {
+  const res = await client
     .update(inventoryLevels)
     .set({ stocked: sql`${inventoryLevels.stocked} - ${qty}`, updatedAt: new Date() })
     .where(and(eq(inventoryLevels.variantId, variantId), sql`${inventoryLevels.stocked} >= ${qty}`))
@@ -85,8 +90,8 @@ async function decrementStock(variantId: number, qty: number): Promise<boolean> 
  * Repone stock. Contrato: solo vale para pedidos que descontaron al crearse
  * (createOrder); los pedidos del seed se insertan directo en SQL y no descuentan.
  */
-async function restoreStock(variantId: number, qty: number): Promise<void> {
-  await db
+export async function restoreStock(variantId: number, qty: number, client: DbClient = db): Promise<void> {
+  await client
     .update(inventoryLevels)
     .set({ stocked: sql`${inventoryLevels.stocked} + ${qty}`, updatedAt: new Date() })
     .where(eq(inventoryLevels.variantId, variantId));
@@ -145,49 +150,100 @@ export async function createOrder(
   }
   if (!customerId) return { ok: false, error: "Falta el cliente del pedido." };
 
-  // Totales y displayId se calculan ANTES de reservar stock: solo leen BD,
-  // y si fallan no dejan stock descontado sin pedido (ventana de fuga).
+  // Totales y displayId se calculan ANTES de la transacción: solo leen BD,
+  // y si fallan no dejan nada a medias.
   const totals = await evaluateCart(lines, input.promoCode ?? null);
   const displayId = await nextDisplayId();
 
-  // Reserva de inventario atómica con rollback manual si alguna línea falla.
-  const taken: OrderInputItem[] = [];
-  for (const l of lines) {
-    const ok = await decrementStock(l.variantId, l.quantity);
-    if (!ok) {
-      for (const t of taken) await restoreStock(t.variantId, t.quantity);
-      return { ok: false, error: `Sin stock suficiente para ${l.title} · talla ${l.size}.` };
-    }
-    taken.push({ variantId: l.variantId, quantity: l.quantity });
-  }
-
   const now = new Date();
+  const appliedPromo = totals.applied[0] ?? null;
 
-  let order;
   try {
-    [order] = await db
-      .insert(orders)
-      .values({
-        displayId,
-        customerId,
-        source: input.source,
-        status: "pending",
-        operationalTag: "por_revisar",
-        fulfillmentClass: input.fulfillmentClass,
-        subtotalCents: totals.subtotalCents,
-        discountCents: totals.discountCents,
-        totalCents: totals.totalCents,
-        discountBreakdown: totals.applied.map((a) => ({ label: a.label, amountCents: a.amountCents })),
-        paymentRef: input.paymentRef ?? "",
-        paymentMethod: input.paymentMethod ?? "",
-        notes: input.notes ?? "",
-        tagHistory: [{ tag: "por_revisar", at: now.toISOString(), by: actor.name }],
-        idempotencyKey,
-      })
-      .returning();
+    const created = await db.transaction(async (tx) => {
+      // Reserva de inventario: el WHERE garantiza stocked >= qty (sin negativos).
+      // Si una línea no alcanza, la tx completa hace rollback: no queda stock
+      // descontado sin pedido (el rollback manual ya no existe).
+      for (const l of lines) {
+        const ok = await decrementStock(l.variantId, l.quantity, tx);
+        if (!ok) {
+          return {
+            ok: false as const,
+            error: `Sin stock suficiente para ${l.title} · talla ${l.size}.`,
+          };
+        }
+      }
+
+      const [order] = await tx
+        .insert(orders)
+        .values({
+          displayId,
+          customerId,
+          source: input.source,
+          status: "pending",
+          operationalTag: "por_revisar",
+          fulfillmentClass: input.fulfillmentClass,
+          subtotalCents: totals.subtotalCents,
+          discountCents: totals.discountCents,
+          totalCents: totals.totalCents,
+          discountBreakdown: totals.applied.map((a) => ({ label: a.label, amountCents: a.amountCents })),
+          paymentRef: input.paymentRef ?? "",
+          paymentMethod: input.paymentMethod ?? "",
+          notes: input.notes ?? "",
+          tagHistory: [{ tag: "por_revisar", at: now.toISOString(), by: actor.name }],
+          idempotencyKey,
+        })
+        .returning();
+
+      for (const l of lines) {
+        const [v] = await tx.select().from(variants).where(eq(variants.id, l.variantId)).limit(1);
+        await tx.insert(orderItems).values({
+          orderId: order.id,
+          variantId: l.variantId,
+          productTitle: l.title,
+          size: l.size,
+          sku: v?.sku ?? "",
+          unitPriceCents: l.unitPriceCents,
+          quantity: l.quantity,
+        });
+      }
+
+      if (input.fulfillmentClass === "enviar") {
+        await tx.insert(shipments).values({
+          orderId: order.id,
+          status: "revision",
+          statusHistory: [{ status: "revision", at: now.toISOString(), by: actor.name }],
+        });
+      }
+
+      // Promo aplicada: su contador de usos sube dentro de la MISMA transacción.
+      if (appliedPromo) {
+        await tx
+          .update(promotions)
+          .set({ usageCount: sql`${promotions.usageCount} + 1` })
+          .where(eq(promotions.id, appliedPromo.id));
+      }
+
+      await recordAudit(
+        {
+          actor,
+          module: "pedidos",
+          entityType: "order",
+          entityId: displayId,
+          action: "create",
+          summary: `Pedido ${displayId} creado desde ${input.source === "web" ? "la tienda" : "el dashboard"} · clase ${input.fulfillmentClass}.`,
+          newValue: { total: totals.totalCents, items: lines.length },
+        },
+        tx,
+      );
+
+      return { ok: true as const, orderId: order.id };
+    });
+
+    if (!created.ok) {
+      return { ok: false, error: created.error };
+    }
+    return { ok: true, orderId: created.orderId, displayId };
   } catch (e) {
-    // Devolvemos el stock ya descontado ante CUALQUIER fallo del insert.
-    for (const t of taken) await restoreStock(t.variantId, t.quantity);
     const err = e as { code?: string; cause?: { code?: string } } | null;
     // Drizzle envuelve el error de PG: el código puede estar en e o en e.cause.
     if (err?.code === "23505" || err?.cause?.code === "23505") {
@@ -196,128 +252,132 @@ export async function createOrder(
       return { ok: false, error: "No se pudo crear el pedido por concurrencia. Intente de nuevo." };
     }
     // Error real (FK, red, BD): no lo enmascaramos — sube como 500 con su causa.
+    // El rollback de la tx ya devolvió todo a su estado previo.
     throw e;
   }
-
-  try {
-    for (const l of lines) {
-      const [v] = await db.select().from(variants).where(eq(variants.id, l.variantId)).limit(1);
-      await db.insert(orderItems).values({
-        orderId: order.id,
-        variantId: l.variantId,
-        productTitle: l.title,
-        size: l.size,
-        sku: v?.sku ?? "",
-        unitPriceCents: l.unitPriceCents,
-        quantity: l.quantity,
-      });
-    }
-
-    if (input.fulfillmentClass === "enviar") {
-      await db.insert(shipments).values({
-        orderId: order.id,
-        status: "revision",
-        statusHistory: [{ status: "revision", at: now.toISOString(), by: actor.name }],
-      });
-    }
-
-    await recordAudit({
-      actor,
-      module: "pedidos",
-      entityType: "order",
-      entityId: displayId,
-      action: "create",
-      summary: `Pedido ${displayId} creado desde ${input.source === "web" ? "la tienda" : "el dashboard"} · clase ${input.fulfillmentClass}.`,
-      newValue: { total: totals.totalCents, items: lines.length },
-    });
-  } catch (e) {
-    // Fallo tras reservar stock: no dejamos un pedido a medias ni inventario
-    // descontado — se borra lo insertado y se devuelve el stock.
-    await db.delete(orderItems).where(eq(orderItems.orderId, order.id));
-    await db.delete(shipments).where(eq(shipments.orderId, order.id));
-    await db.delete(orders).where(eq(orders.id, order.id));
-    for (const t of taken) await restoreStock(t.variantId, t.quantity);
-    throw e;
-  }
-
-  return { ok: true, orderId: order.id, displayId };
 }
 
-export async function changeOperationalTag(
+export type TagTransitionResult =
+  | { ok: true }
+  | { noop: true }
+  | { ok: false; status: number; error: string };
+
+/** Falla de una transición de tag: sale de la tx como excepción para forzar rollback. */
+class TagTransitionRejected extends Error {
+  constructor(readonly result: { ok: false; status: number; error: string }) {
+    super(result.error);
+  }
+}
+
+/**
+ * Transición de tag en UNA transacción: SELECT ... FOR UPDATE serializa dos
+ * cambios concurrentes sobre la misma fila (mata el TOCTOU del guard+update),
+ * valida contra la matriz canChangeTag y aplica tag + tag_history + stock +
+ * envío + audit dentro de la misma tx. Nada se persiste a medias.
+ */
+export async function transitionTag(
   orderId: number,
   tag: OperationalTag,
   actor: Actor,
-): Promise<{ ok: boolean; error?: string }> {
-  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
-  if (!order) return { ok: false, error: "Pedido no encontrado." };
-  if (order.operationalTag === tag) return { ok: true };
-
-  const history = [...order.tagHistory, { tag, at: new Date().toISOString(), by: actor.name }];
-  const wasCanceled = order.status === "canceled";
-  const willCancel = tag === "cancelado";
-
-  // Reactivar un pedido cancelado exige re-reservar stock (puede fallar si ya se vendió).
-  // Se hace ANTES de tocar el pedido: si no alcanza, nada cambia.
-  if (wasCanceled && !willCancel) {
-    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-    const taken: OrderInputItem[] = [];
-    for (const it of items) {
-      const ok = await decrementStock(it.variantId, it.quantity);
-      if (!ok) {
-        for (const t of taken) await restoreStock(t.variantId, t.quantity);
-        return { ok: false, error: `Sin stock suficiente para ${it.productTitle} · talla ${it.size}.` };
+): Promise<TagTransitionResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1)
+        .for("update");
+      if (!order) {
+        throw new TagTransitionRejected({ ok: false, status: 404, error: "Pedido no encontrado." });
       }
-      taken.push({ variantId: it.variantId, quantity: it.quantity });
-    }
-  }
+      if (order.operationalTag === tag) return { noop: true };
 
-  await db
-    .update(orders)
-    .set({
-      operationalTag: tag,
-      tagHistory: history,
-      status: tag === "completado" ? "completed" : tag === "cancelado" ? "canceled" : "pending",
-    })
-    .where(eq(orders.id, orderId));
+      const [ship] = await tx.select().from(shipments).where(eq(shipments.orderId, orderId)).limit(1);
+      const check = canChangeTag(order.operationalTag, tag, ship?.status ?? null);
+      if (!check.ok) {
+        throw new TagTransitionRejected({
+          ok: false,
+          status: 409,
+          error: check.reason ?? "Transición no permitida.",
+        });
+      }
 
-  if (willCancel && !wasCanceled) {
-    // Primera cancelación: se devuelve el stock UNA sola vez y se archiva el envío.
-    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-    for (const it of items) await restoreStock(it.variantId, it.quantity);
-    await db
-      .update(shipments)
-      .set({ status: "archivado", archivedAt: new Date() })
-      .where(eq(shipments.orderId, orderId));
-  } else if (wasCanceled && !willCancel) {
-    // Reactivación: el envío archivado vuelve al tablero en Revisión.
-    const [sh] = await db.select().from(shipments).where(eq(shipments.orderId, orderId)).limit(1);
-    if (sh && sh.status === "archivado") {
-      await db
-        .update(shipments)
+      const history = [...order.tagHistory, { tag, at: new Date().toISOString(), by: actor.name }];
+      const wasCanceled = order.status === "canceled";
+      const willCancel = tag === "cancelado";
+
+      // Reactivar un pedido cancelado exige re-reservar stock (puede fallar si
+      // ya se vendió). Si no alcanza, la tx hace rollback y nada cambia.
+      if (wasCanceled && !willCancel) {
+        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+        for (const it of items) {
+          const ok = await decrementStock(it.variantId, it.quantity, tx);
+          if (!ok) {
+            throw new TagTransitionRejected({
+              ok: false,
+              status: 400,
+              error: `Sin stock suficiente para ${it.productTitle} · talla ${it.size}.`,
+            });
+          }
+        }
+      }
+
+      await tx
+        .update(orders)
         .set({
-          status: "revision",
-          archivedAt: null,
-          statusHistory: [
-            ...sh.statusHistory,
-            { status: "revision", at: new Date().toISOString(), by: actor.name },
-          ],
+          operationalTag: tag,
+          tagHistory: history,
+          status: tag === "completado" ? "completed" : tag === "cancelado" ? "canceled" : "pending",
         })
-        .where(eq(shipments.orderId, orderId));
-    }
-  }
+        .where(eq(orders.id, orderId));
 
-  await recordAudit({
-    actor,
-    module: "pedidos",
-    entityType: "order",
-    entityId: order.displayId,
-    action: "status_change",
-    fieldChanged: "operational_tag",
-    oldValue: order.operationalTag,
-    newValue: tag,
-    summary: `${actor.name} cambió el estado del equipo del pedido ${order.displayId} de ${order.operationalTag} a ${tag}.`,
-  });
-  return { ok: true };
+      if (willCancel && !wasCanceled) {
+        // Primera cancelación: se devuelve el stock UNA sola vez y se archiva el envío.
+        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+        for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+        await tx
+          .update(shipments)
+          .set({ status: "archivado", archivedAt: new Date() })
+          .where(eq(shipments.orderId, orderId));
+      } else if (wasCanceled && !willCancel) {
+        // Reactivación: el envío archivado vuelve al tablero en Revisión.
+        const [sh] = await tx.select().from(shipments).where(eq(shipments.orderId, orderId)).limit(1);
+        if (sh && sh.status === "archivado") {
+          await tx
+            .update(shipments)
+            .set({
+              status: "revision",
+              archivedAt: null,
+              statusHistory: [
+                ...sh.statusHistory,
+                { status: "revision", at: new Date().toISOString(), by: actor.name },
+              ],
+            })
+            .where(eq(shipments.orderId, orderId));
+        }
+      }
+
+      await recordAudit(
+        {
+          actor,
+          module: "pedidos",
+          entityType: "order",
+          entityId: order.displayId,
+          action: "status_change",
+          fieldChanged: "operational_tag",
+          oldValue: order.operationalTag,
+          newValue: tag,
+          summary: `${actor.name} cambió el estado del equipo del pedido ${order.displayId} de ${order.operationalTag} a ${tag}.`,
+        },
+        tx,
+      );
+      return { ok: true };
+    });
+  } catch (e) {
+    if (e instanceof TagTransitionRejected) return e.result;
+    throw e;
+  }
 }
 
 /** Job 24h: los envíos completados hace más de 24h pasan a archivados. */

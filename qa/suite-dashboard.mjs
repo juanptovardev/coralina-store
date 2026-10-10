@@ -202,9 +202,7 @@ async function run() {
       if (mkCancelHd.json?.ok && mkCancelHd.json?.orderId) {
         const cancelHd = await post("/api/admin/orders", { action: "set_tag", orderId: mkCancelHd.json.orderId, tag: "cancelado" }, "admin");
         ok("set_tag pending \u2192 cancelado \u2192 200 (setup hard_delete cancelado)", cancelHd.status === 200, http(cancelHd));
-        if (cancelHd.status !== 200) {
-          wa("hard_delete (cancelado) no evaluado: cancel fall\u00f3", http(cancelHd));
-        } else {
+        if (cancelHd.status === 200) {
           const afterCancel = await stockOf();
           const delCancel = await post("/api/admin/orders", { action: "hard_delete", orderId: mkCancelHd.json.orderId, confirmText: mkCancelHd.json.displayId, password: ADMIN_PASS }, "admin");
           const afterDelCancel = await stockOf();
@@ -368,6 +366,8 @@ async function run() {
     } catch { }
 
     // Red de seguridad: borra órdenes QA creadas por create_manual (email qa-dash-*).
+    // El prefijo también cubre los fixtures de hard_delete (qa-dash-hd-*, qa-dash-hdc-*)
+    // si su cancel falló: quedan retenidos y este bloque reintenta cancel + delete.
     // Solo hard_delete si el cancel tuvo éxito: cancelar ya devolvió el stock y
     // hard_delete no lo repone de nuevo (status=canceled).
     try {

@@ -10,9 +10,24 @@ import { ensureSeeded } from "@/lib/seed";
 
 const VALID: ShipmentStatus[] = ["revision", "despacho", "reparto", "completado", "archivado"];
 
-export async function GET() {
+/**
+ * ?page= (1-based) + ?pageSize= con tope duro: acota el payload sin romper
+ * clientes que no envían los parámetros (devuelven la primera página completa).
+ */
+function pageParams(sp: URLSearchParams, defaultSize: number) {
+  const p = Number(sp.get("page"));
+  const s = Number(sp.get("pageSize"));
+  const page = Number.isInteger(p) && p >= 1 ? p : 1;
+  const pageSize = Math.min(200, Number.isInteger(s) && s >= 1 ? s : defaultSize);
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
+export async function GET(req: Request) {
   await ensureSeeded();
   await archiveCompletedShipments(); // job 24h idempotente
+
+  const { searchParams } = new URL(req.url);
+  const { page, pageSize, offset } = pageParams(searchParams, 200);
 
   const rows = await db
     .select({ s: shipments, o: orders, c: customers })
@@ -20,11 +35,13 @@ export async function GET() {
     .innerJoin(orders, eq(orders.id, shipments.orderId))
     .innerJoin(customers, eq(customers.id, orders.customerId))
     .orderBy(asc(shipments.createdAt));
+  const total = rows.length;
+  const pageRows = rows.slice(offset, offset + pageSize);
 
-  const ids = rows.map((r) => r.o.id);
+  const ids = pageRows.map((r) => r.o.id);
   const items = ids.length ? await db.select().from(orderItems).where(inArray(orderItems.orderId, ids)) : [];
 
-  const cards = rows.map(({ s, o, c }) => ({
+  const cards = pageRows.map(({ s, o, c }) => ({
     id: s.id,
     orderId: o.id,
     status: s.status,
@@ -41,7 +58,7 @@ export async function GET() {
     itemCount: items.filter((i) => i.orderId === o.id).reduce((a, i) => a + i.quantity, 0),
   }));
 
-  return NextResponse.json({ shipments: cards });
+  return NextResponse.json({ shipments: cards, page, pageSize, total });
 }
 
 export async function POST(req: Request) {

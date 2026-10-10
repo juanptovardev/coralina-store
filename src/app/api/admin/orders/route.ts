@@ -5,47 +5,45 @@ import { customers, inventoryLevels, orderItems, orders, shipments, type Operati
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { OPERATIONAL_TAGS } from "@/lib/constants";
-import { changeOperationalTag, createOrder } from "@/lib/orders";
+import { transitionTag, createOrder, buildCartLines } from "@/lib/orders";
 import { buildByDay14 } from "@/lib/metrics";
 import { evaluateCart } from "@/lib/promo";
-import { buildCartLines } from "@/lib/orders";
-import { canChangeTag } from "@/lib/domain";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 import { normalizeCartItems } from "@/lib/cart-input";
 
 /**
- * Valida la transición de tag operativo contra la matriz única canChangeTag.
- * "ok" = transición real permitida; "noop" = ya estaba en ese tag; "error" = inválida.
+ * ?page= (1-based) + ?pageSize= con tope duro: acota el payload sin romper
+ * clientes que no envían los parámetros (devuelven la primera página completa).
  */
-type TagGuard =
-  | { kind: "ok" }
-  | { kind: "noop" }
-  | { kind: "error"; status: number; error: string };
-
-async function checkTagTransition(orderId: number, tag: OperationalTag): Promise<TagGuard> {
-  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
-  if (!order) return { kind: "error", status: 404, error: "Pedido no encontrado." };
-  if (order.operationalTag === tag) return { kind: "noop" };
-  const [ship] = await db.select().from(shipments).where(eq(shipments.orderId, orderId)).limit(1);
-  const check = canChangeTag(order.operationalTag, tag, ship?.status ?? null);
-  if (!check.ok) return { kind: "error", status: 409, error: check.reason ?? "Transición no permitida." };
-  return { kind: "ok" };
+function pageParams(sp: URLSearchParams, defaultSize: number) {
+  const p = Number(sp.get("page"));
+  const s = Number(sp.get("pageSize"));
+  const page = Number.isInteger(p) && p >= 1 ? p : 1;
+  const pageSize = Math.min(200, Number.isInteger(s) && s >= 1 ? s : defaultSize);
+  return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   await ensureSeeded();
+  const { searchParams } = new URL(req.url);
+  const { page, pageSize, offset } = pageParams(searchParams, 100);
+
+  // Métricas se calculan sobre TODOS los pedidos (semántica intacta); la
+  // paginación solo recorta el array `orders` que viaja en la respuesta.
   const rows = await db
     .select({ o: orders, c: customers })
     .from(orders)
     .innerJoin(customers, eq(customers.id, orders.customerId))
     .orderBy(desc(orders.createdAt));
+  const total = rows.length;
+  const pageRows = rows.slice(offset, offset + pageSize);
 
-  const ids = rows.map((r) => r.o.id);
+  const ids = pageRows.map((r) => r.o.id);
   const items = ids.length ? await db.select().from(orderItems).where(inArray(orderItems.orderId, ids)) : [];
   const ships = ids.length ? await db.select().from(shipments).where(inArray(shipments.orderId, ids)) : [];
 
-  const data = rows.map(({ o, c }) => ({
+  const data = pageRows.map(({ o, c }) => ({
     ...o,
     customer: c,
     items: items.filter((i) => i.orderId === o.id),
@@ -55,23 +53,23 @@ export async function GET() {
   const now = Date.now();
   const since = (h: number) => new Date(now - h * 3600 * 1000);
   const inRange = (d: Date, h: number) => d >= since(h);
-  const revenue = (list: typeof data) => list.reduce((a, o) => a + o.totalCents, 0);
-  const valid = data.filter((o) => o.status !== "canceled");
+  const revenue = (list: typeof rows) => list.reduce((a, r) => a + r.o.totalCents, 0);
+  const valid = rows.filter((r) => r.o.status !== "canceled");
 
   const metrics = {
-    today: valid.filter((o) => inRange(o.createdAt, 24)).length,
-    week: valid.filter((o) => inRange(o.createdAt, 24 * 7)).length,
-    month: valid.filter((o) => inRange(o.createdAt, 24 * 30)).length,
-    revenueMonth: revenue(valid.filter((o) => inRange(o.createdAt, 24 * 30))),
+    today: valid.filter((r) => inRange(r.o.createdAt, 24)).length,
+    week: valid.filter((r) => inRange(r.o.createdAt, 24 * 7)).length,
+    month: valid.filter((r) => inRange(r.o.createdAt, 24 * 30)).length,
+    revenueMonth: revenue(valid.filter((r) => inRange(r.o.createdAt, 24 * 30))),
     avgTicket: valid.length ? Math.round(revenue(valid) / valid.length) : 0,
-    byTag: valid.reduce<Record<string, number>>((acc, o) => {
-      acc[o.operationalTag] = (acc[o.operationalTag] ?? 0) + 1;
+    byTag: valid.reduce<Record<string, number>>((acc, r) => {
+      acc[r.o.operationalTag] = (acc[r.o.operationalTag] ?? 0) + 1;
       return acc;
     }, {}),
-    byDay: buildByDay14(valid, now),
+    byDay: buildByDay14(valid.map((r) => r.o), now),
   };
 
-  return NextResponse.json({ orders: data, metrics });
+  return NextResponse.json({ orders: data, metrics, page, pageSize, total });
 }
 
 export async function POST(req: Request) {
@@ -129,12 +127,10 @@ export async function POST(req: Request) {
     if (!OPERATIONAL_TAGS.some((t) => t.value === tag)) {
       return NextResponse.json({ ok: false, error: "Tag inválido." }, { status: 400 });
     }
-    const guard = await checkTagTransition(id, tag);
-    if (guard.kind === "error") {
-      return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-    }
-    const res = await changeOperationalTag(id, tag, actor);
-    return NextResponse.json(res, { status: res.ok ? 200 : 400 });
+    const res = await transitionTag(id, tag, actor);
+    if ("noop" in res) return NextResponse.json({ ok: true });
+    if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: res.status });
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "bulk_tag") {
@@ -151,15 +147,10 @@ export async function POST(req: Request) {
     let changed = 0;
     const errors: string[] = [];
     for (const id of ids) {
-      const guard = await checkTagTransition(id, tag as OperationalTag);
-      if (guard.kind === "error") {
-        errors.push(`#${id}: ${guard.error}`);
-        continue;
-      }
-      if (guard.kind === "noop") continue;
-      const res = await changeOperationalTag(id, tag as OperationalTag, actor);
+      const res = await transitionTag(id, tag as OperationalTag, actor);
+      if ("noop" in res) continue;
       if (res.ok) changed += 1;
-      else errors.push(`#${id}: ${res.error ?? "error"}`);
+      else errors.push(`#${id}: ${res.error}`);
     }
     // Un bulk 100% no-op (idempotente) no es un error: 200 con changed=0.
     const okAll = errors.length === 0;
@@ -212,7 +203,7 @@ export async function POST(req: Request) {
     // (un reintento no repone de nuevo). El audit se escribe tras el commit.
     await db.transaction(async (tx) => {
       // Reponer stock si el pedido NO estaba cancelado: al crearse descontó stock
-      // (un cancelado ya lo repuso una sola vez vía changeOperationalTag).
+        // (un cancelado ya lo repuso una sola vez vía transitionTag).
       // Contrato: solo pedidos creados vía createOrder; los del seed se insertan
       // directo en SQL y no descontaron stock (no se debe inflar inventario).
       if (order.status !== "canceled") {

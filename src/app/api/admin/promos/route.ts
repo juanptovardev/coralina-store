@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     priority?: number;
     enabled?: boolean;
     code?: string;
+    startsAt?: string | null;
     endsAt?: string | null;
     id?: number;
     password?: string;
@@ -54,75 +55,77 @@ export async function POST(req: Request) {
   }
   const action = body.action as string;
 
-  if (action === "create") {
-    const type = String(body.type ?? "");
+  /**
+   * Guardia compartida create/update: whitelist de tipo, montos/porcentajes,
+   * contrato sku_percent (1 producto), categorías obligatorias, rango de
+   * fechas y minQty entero ≥ 0. Devuelve los valores normalizados listos
+   * para persistir.
+   */
+  function validatePromo(
+    promo: PromoBody,
+  ): { ok: true; values: (typeof promotions.$inferInsert) } | { ok: false; error: string } {
+    const type = String(promo.type ?? "");
     const VALID_TYPES = ["category_percent", "category_amount", "sku_percent", "combo", "cart_amount"];
     if (!VALID_TYPES.includes(type)) {
-      return NextResponse.json({ ok: false, error: "Tipo de promoción inválido." }, { status: 400 });
+      return { ok: false, error: "Tipo de promoción inválido." };
     }
-    const amountCents = Number(body.amountCents ?? 0);
-    const percent = Number(body.percent ?? 0);
-    const comboPriceCents = Number(body.comboPriceCents ?? 0);
+    const amountCents = Number(promo.amountCents ?? 0);
+    const percent = Number(promo.percent ?? 0);
+    const comboPriceCents = Number(promo.comboPriceCents ?? 0);
     if (type === "category_amount" && amountCents <= 0) {
-      return NextResponse.json(
-        { ok: false, error: "El descuento fijo por categoría requiere un monto mayor a 0." },
-        { status: 400 },
-      );
+      return { ok: false, error: "El descuento fijo por categoría requiere un monto mayor a 0." };
     }
     if (type === "cart_amount" && amountCents <= 0 && percent <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "El descuento por monto de carrito requiere un monto o un porcentaje mayor a 0.",
-        },
-        { status: 400 },
-      );
+      return {
+        ok: false,
+        error: "El descuento por monto de carrito requiere un monto o un porcentaje mayor a 0.",
+      };
     }
     if (type === "combo" && comboPriceCents <= 0) {
-      return NextResponse.json(
-        { ok: false, error: "El combo requiere un precio de combo mayor a 0." },
-        { status: 400 },
-      );
+      return { ok: false, error: "El combo requiere un precio de combo mayor a 0." };
     }
     // Rango de porcentaje: un typo (p.ej. 500) no debe volverse 100% de descuento.
     if ((type === "category_percent" || type === "sku_percent") && (percent <= 0 || percent > 100)) {
-      return NextResponse.json(
-        { ok: false, error: "El porcentaje debe estar entre 1 y 100." },
-        { status: 400 },
-      );
+      return { ok: false, error: "El porcentaje debe estar entre 1 y 100." };
     }
     if (type === "cart_amount" && percent > 100) {
-      return NextResponse.json(
-        { ok: false, error: "El porcentaje debe estar entre 0 y 100." },
-        { status: 400 },
-      );
+      return { ok: false, error: "El porcentaje debe estar entre 0 y 100." };
     }
-    const nums = {
-      amountCents,
-      percent,
-      comboPriceCents,
-      minSubtotalCents: Number(body.minSubtotalCents ?? 0),
-      minQty: Number(body.minQty ?? 0),
-      priority: Number(body.priority ?? 10),
-    };
-    if (Object.values(nums).some((v) => !Number.isFinite(v))) {
-      return NextResponse.json({ ok: false, error: "Montos o cantidades inválidos." }, { status: 400 });
+    const minSubtotalCents = Number(promo.minSubtotalCents ?? 0);
+    const minQty = Number(promo.minQty ?? 0);
+    const priority = Number(promo.priority ?? 10);
+    if (![amountCents, percent, comboPriceCents, minSubtotalCents, minQty, priority].every(Number.isFinite)) {
+      return { ok: false, error: "Montos o cantidades inválidos." };
     }
-    if (body.endsAt && Number.isNaN(new Date(body.endsAt).getTime())) {
-      return NextResponse.json({ ok: false, error: "Fecha de fin inválida." }, { status: 400 });
+    if (!Number.isInteger(minQty) || minQty < 0) {
+      return { ok: false, error: "La cantidad mínima debe ser un entero mayor o igual a 0." };
+    }
+    let startsAt: Date | null = null;
+    if (promo.startsAt !== undefined && promo.startsAt !== null && promo.startsAt !== "") {
+      startsAt = new Date(promo.startsAt);
+      if (Number.isNaN(startsAt.getTime())) {
+        return { ok: false, error: "Fecha de inicio inválida." };
+      }
+    }
+    let endsAt: Date | null = null;
+    if (promo.endsAt) {
+      endsAt = new Date(promo.endsAt);
+      if (Number.isNaN(endsAt.getTime())) {
+        return { ok: false, error: "Fecha de fin inválida." };
+      }
+    }
+    if (startsAt && endsAt && endsAt < startsAt) {
+      return { ok: false, error: "La fecha de fin no puede ser anterior a la fecha de inicio." };
     }
     // Frontera admin → motor de precios: el storefront (domain.ts) solo
     // interpreta productIds en sku_percent (un producto) y categoryIds en el
     // resto; se normaliza para que ambos motores calculen lo mismo.
-    let categoryIds = (body.categoryIds as number[]) ?? [];
-    let productIds = (body.productIds as number[]) ?? [];
+    let categoryIds = (promo.categoryIds as number[]) ?? [];
+    let productIds = (promo.productIds as number[]) ?? [];
     if (type === "sku_percent") {
       categoryIds = [];
       if (productIds.length !== 1) {
-        return NextResponse.json(
-          { ok: false, error: "sku_percent requiere exactamente 1 producto (contrato del storefront)." },
-          { status: 400 },
-        );
+        return { ok: false, error: "sku_percent requiere exactamente 1 producto (contrato del storefront)." };
       }
     } else {
       productIds = [];
@@ -133,32 +136,38 @@ export async function POST(req: Request) {
       (type === "category_percent" || type === "category_amount") &&
       (!Array.isArray(categoryIds) || categoryIds.length < 1)
     ) {
-      return NextResponse.json(
-        { ok: false, error: "Una promo por categoría necesita al menos una categoría." },
-        { status: 400 },
-      );
+      return { ok: false, error: "Una promo por categoría necesita al menos una categoría." };
     }
-    const [p] = await db
-      .insert(promotions)
-      .values({
-        name: String(body.name ?? "Promo sin nombre"),
+    return {
+      ok: true,
+      values: {
+        name: String(promo.name ?? "Promo sin nombre"),
         type: type as (typeof promotions.$inferInsert)["type"],
         categoryIds,
         productIds,
-        percent: Number(body.percent ?? 0),
-        amountCents: Number(body.amountCents ?? 0),
-        minQty: Number(body.minQty ?? 0),
-        minSubtotalCents: Number(body.minSubtotalCents ?? 0),
-        comboPriceCents: Number(body.comboPriceCents ?? 0),
-        priority: Number(body.priority ?? 10),
+        percent: Number(promo.percent ?? 0),
+        amountCents: Number(promo.amountCents ?? 0),
+        minQty: Number(promo.minQty ?? 0),
+        minSubtotalCents: Number(promo.minSubtotalCents ?? 0),
+        comboPriceCents: Number(promo.comboPriceCents ?? 0),
+        priority: Number(promo.priority ?? 10),
         // Contrato single-promo (PRD 12.2): el motor no apila; se persiste
         // false para que la fila no mienta sobre el efecto real.
         stackable: false,
-        enabled: body.enabled !== false,
-        code: String(body.code ?? "").trim().toUpperCase(),
-        endsAt: body.endsAt ? new Date(body.endsAt) : null,
-      })
-      .returning();
+        enabled: promo.enabled !== false,
+        code: String(promo.code ?? "").trim().toUpperCase(),
+        startsAt: startsAt ?? new Date(),
+        endsAt,
+      },
+    };
+  }
+
+  if (action === "create") {
+    const v = validatePromo(body);
+    if (!v.ok) {
+      return NextResponse.json({ ok: false, error: v.error }, { status: 400 });
+    }
+    const [p] = await db.insert(promotions).values(v.values).returning();
     await recordAudit({
       actor,
       module: "promos",
@@ -168,6 +177,59 @@ export async function POST(req: Request) {
       summary: `${actor.name} creó la promoción «${p.name}».`,
     });
     return NextResponse.json({ ok: true, id: p.id });
+  }
+
+  if (action === "update") {
+    const id = Number(body.id);
+    const [p] = await db.select().from(promotions).where(eq(promotions.id, id)).limit(1);
+    if (!p) return NextResponse.json({ ok: false, error: "Promo no encontrada." }, { status: 404 });
+    const v = validatePromo(body);
+    if (!v.ok) {
+      return NextResponse.json({ ok: false, error: v.error }, { status: 400 });
+    }
+    const values = v.values;
+    // Edición completa: campos no enviados conservan el valor previo
+    // (startsAt/endsAt/enabled son opcionales para clientes que solo renombran).
+    const [updated] = await db
+      .update(promotions)
+      .set({
+        name: values.name,
+        type: values.type,
+        categoryIds: values.categoryIds,
+        productIds: values.productIds,
+        percent: values.percent,
+        amountCents: values.amountCents,
+        minQty: values.minQty,
+        minSubtotalCents: values.minSubtotalCents,
+        comboPriceCents: values.comboPriceCents,
+        priority: values.priority,
+        stackable: false,
+        enabled: body.enabled === undefined ? p.enabled : values.enabled,
+        code: values.code,
+        startsAt: body.startsAt === undefined || body.startsAt === null || body.startsAt === ""
+          ? p.startsAt
+          : values.startsAt!,
+        endsAt: body.endsAt === undefined ? p.endsAt : values.endsAt,
+      })
+      .where(eq(promotions.id, id))
+      .returning();
+    await recordAudit({
+      actor,
+      module: "promos",
+      entityType: "promotion",
+      entityId: id,
+      action: "update",
+      oldValue: { name: p.name, type: p.type, enabled: p.enabled, percent: p.percent, amountCents: p.amountCents },
+      newValue: {
+        name: updated.name,
+        type: updated.type,
+        enabled: updated.enabled,
+        percent: updated.percent,
+        amountCents: updated.amountCents,
+      },
+      summary: `${actor.name} actualizó la promoción «${updated.name}».`,
+    });
+    return NextResponse.json({ ok: true, id });
   }
 
   if (action === "toggle") {

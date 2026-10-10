@@ -176,18 +176,64 @@ export async function POST(req: Request) {
   if (action === "create_product") {
     const title = String(body.title ?? "").trim();
     const categoryId = Number(body.categoryId);
-    const price = Number(body.priceCents ?? 0);
-    const images = (body.images as string[]) ?? [];
-    const sizes = (body.sizes as { size: string; stock: number }[]) ?? [];
-    const status = body.status === "published" ? "published" : "draft";
-
-    if (!title || !categoryId) {
+    const price = Number(body.priceCents);
+    const images = (Array.isArray(body.images) ? body.images : []).map(String);
+    const rawSizes = (Array.isArray(body.sizes) ? body.sizes : []) as { size?: unknown; stock?: unknown }[];
+    const rawStatus = String(body.status ?? "draft");
+    if (!title || !Number.isInteger(categoryId) || categoryId <= 0) {
       return NextResponse.json({ ok: false, error: "Nombre y categoría son obligatorios." }, { status: 400 });
     }
+    const [cat] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.id, categoryId))
+      .limit(1);
+    if (!cat) {
+      return NextResponse.json({ ok: false, error: "La categoría seleccionada no existe." }, { status: 400 });
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      return NextResponse.json({ ok: false, error: "El precio debe ser mayor a 0." }, { status: 400 });
+    }
+    let compareAtCents: number | null = null;
+    if (body.compareAtCents !== undefined && body.compareAtCents !== null && body.compareAtCents !== "") {
+      compareAtCents = Number(body.compareAtCents);
+      if (!Number.isFinite(compareAtCents)) {
+        return NextResponse.json({ ok: false, error: "El precio de comparación no es válido." }, { status: 400 });
+      }
+      if (compareAtCents < price) {
+        return NextResponse.json(
+          { ok: false, error: "El precio de comparación no puede ser menor al precio actual." },
+          { status: 400 },
+        );
+      }
+    }
+    if (!["draft", "published", "archived"].includes(rawStatus)) {
+      return NextResponse.json(
+        { ok: false, error: "Estado inválido: debe ser draft, published o archived." },
+        { status: 400 },
+      );
+    }
+    const status = rawStatus as "draft" | "published" | "archived";
     if (status === "published") {
-      if (price <= 0) return NextResponse.json({ ok: false, error: "Publicar exige precio mayor a 0." }, { status: 400 });
       if (images.length === 0) return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 imagen." }, { status: 400 });
-      if (sizes.length === 0) return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
+      if (rawSizes.length === 0) return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
+    }
+    // Tallas: nombre obligatorio + stock entero ≥ 0; duplicadas → gana la
+    // primera (dedupe también evita el 23505 del índice único productId+size).
+    const sizes = new Map<string, number>();
+    for (const s of rawSizes) {
+      const name = String(s?.size ?? "").trim();
+      if (!name) {
+        return NextResponse.json({ ok: false, error: "Cada talla necesita un nombre." }, { status: 400 });
+      }
+      const stock = Number(s?.stock ?? 0);
+      if (!Number.isInteger(stock) || stock < 0) {
+        return NextResponse.json(
+          { ok: false, error: "El stock de cada talla debe ser un entero mayor o igual a 0." },
+          { status: 400 },
+        );
+      }
+      if (!sizes.has(name)) sizes.set(name, stock);
     }
 
     const handle = slugify(title);
@@ -205,22 +251,22 @@ export async function POST(req: Request) {
         categoryId,
         status,
         priceCents: price,
-        compareAtCents: body.compareAtCents ? Number(body.compareAtCents) : null,
+        compareAtCents,
         images,
         tags: (body.tags as string[]) ?? [],
       })
       .returning();
 
-    for (const s of sizes) {
+    for (const [size, stock] of sizes) {
       const [v] = await db
         .insert(variants)
         .values({
           productId: prod.id,
-          size: s.size,
-          sku: `${handle.toUpperCase().replace(/-/g, "")}-${s.size}`,
+          size,
+          sku: `${handle.toUpperCase().replace(/-/g, "")}-${size}`,
         })
         .returning();
-      await db.insert(inventoryLevels).values({ variantId: v.id, stocked: Math.max(0, Number(s.stock) || 0), threshold: 4 });
+      await db.insert(inventoryLevels).values({ variantId: v.id, stocked: stock, threshold: 4 });
     }
 
     await recordAudit({
@@ -229,7 +275,7 @@ export async function POST(req: Request) {
       entityType: "product",
       entityId: prod.id,
       action: "create",
-      summary: `${actor.name} creó el producto «${title}» (${sizes.length} tallas) en estado ${status}.`,
+      summary: `${actor.name} creó el producto «${title}» (${sizes.size} tallas) en estado ${status}.`,
     });
     return NextResponse.json({ ok: true, id: prod.id, handle });
   }
@@ -239,8 +285,65 @@ export async function POST(req: Request) {
     const [prod] = await db.select().from(products).where(eq(products.id, id)).limit(1);
     if (!prod) return NextResponse.json({ ok: false, error: "Producto no encontrado." }, { status: 404 });
     const patch: Record<string, unknown> = {};
-    if (body.status) patch.status = body.status;
-    if (body.priceCents !== undefined) patch.priceCents = Number(body.priceCents);
+    if (body.status !== undefined) {
+      const status = String(body.status);
+      if (!["draft", "published", "archived"].includes(status)) {
+        return NextResponse.json(
+          { ok: false, error: "Estado inválido: debe ser draft, published o archived." },
+          { status: 400 },
+        );
+      }
+      if (status === "published") {
+        // Publicar exige al menos 1 imagen y 1 talla activa (validación server-side).
+        if (!Array.isArray(prod.images) || prod.images.length === 0) {
+          return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 imagen." }, { status: 400 });
+        }
+        const activeVariants = await db
+          .select({ id: variants.id })
+          .from(variants)
+          .where(and(eq(variants.productId, id), eq(variants.active, true)))
+          .limit(1);
+        if (activeVariants.length === 0) {
+          return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
+        }
+      }
+      patch.status = status;
+    }
+    if (body.categoryId !== undefined) {
+      const catId = Number(body.categoryId);
+      const [cat] = Number.isInteger(catId)
+        ? await db.select({ id: categories.id }).from(categories).where(eq(categories.id, catId)).limit(1)
+        : [];
+      if (!cat) {
+        return NextResponse.json({ ok: false, error: "La categoría seleccionada no existe." }, { status: 400 });
+      }
+      patch.categoryId = catId;
+    }
+    if (body.priceCents !== undefined) {
+      const price = Number(body.priceCents);
+      if (!Number.isFinite(price) || price <= 0) {
+        return NextResponse.json({ ok: false, error: "El precio debe ser mayor a 0." }, { status: 400 });
+      }
+      patch.priceCents = price;
+    }
+    if (body.compareAtCents !== undefined) {
+      if (body.compareAtCents === null || body.compareAtCents === "") {
+        patch.compareAtCents = null;
+      } else {
+        const compareAt = Number(body.compareAtCents);
+        if (!Number.isFinite(compareAt)) {
+          return NextResponse.json({ ok: false, error: "El precio de comparación no es válido." }, { status: 400 });
+        }
+        const effectivePrice = (patch.priceCents as number) ?? prod.priceCents;
+        if (compareAt < effectivePrice) {
+          return NextResponse.json(
+            { ok: false, error: "El precio de comparación no puede ser menor al precio actual." },
+            { status: 400 },
+          );
+        }
+        patch.compareAtCents = compareAt;
+      }
+    }
     if (body.title) patch.title = String(body.title);
     await db.update(products).set(patch).where(eq(products.id, id));
     await recordAudit({

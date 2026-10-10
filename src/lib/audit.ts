@@ -21,8 +21,11 @@ export type AuditInput = {
   summary: string;
 };
 
-export async function recordAudit(input: AuditInput): Promise<void> {
-  await db.insert(auditLog).values({
+/** Cliente de ejecución: el pool global (db) o la transacción en curso (tx). */
+type AuditClient = Pick<typeof db, "insert">;
+
+export async function recordAudit(input: AuditInput, client?: AuditClient): Promise<void> {
+  await (client ?? db).insert(auditLog).values({
     actorName: input.actor.name,
     actorRole: input.actor.role,
     module: input.module,

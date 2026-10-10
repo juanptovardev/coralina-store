@@ -37,6 +37,8 @@ function buttons(html) { const out = []; let m; while ((m = btnRe.exec(html))) {
 function anchors(html) { const out = []; let m; while ((m = aRe.exec(html))) out.push({ href: m[1], label: strip(m[2]) }); return out; }
 
 const PLACEHOLDER = /\b(TODO|FIXME|lorem|undefined|NaN|placeholder)\b/;
+// Marcadores de error boundary (evita falsos positivos del payload RSC de Next 15 que contiene "digest").
+const ERROR_MARKERS = ["mala pasada", "Algo salió mal", "Application error", "La consola tuvo un problema"];
 const isRedirect = (st) => st >= 300 && st < 400;
 const isDead = (st) => st === 0 || st >= 300;
 const httpLabel = (st) => (st === 0 ? "(sin respuesta)" : `(HTTP ${st})`);
@@ -60,7 +62,8 @@ console.log(`\n=== AUDITORÍA UI v6 — ${BASE} ===\n`);
 for (const p of ADMIN_PAGES) {
   const r = await get(p, ADMIN);
   console.log(`${p}  HTTP ${r.status}  len=${r.text.length}`);
-  if (r.status === 200 && r.text.includes("digest")) problems.push(`[error-boundary] ${p} muestra el error boundary (marcador digest)`);
+  const errMarker = ERROR_MARKERS.find((m) => r.text.includes(m));
+  if (r.status === 200 && errMarker) problems.push(`[error-boundary] ${p} muestra el error boundary ("${errMarker}")`);
   const aliasRedirect = p === "/dashboard" && isRedirect(r.status); // /dashboard → /admin es intencional
   if (isRedirect(r.status) && !aliasRedirect) problems.push(`[page] ${p} redirige ${httpLabel(r.status)} — la cookie admin no dio acceso`);
   else if (r.status !== 200 && !aliasRedirect) problems.push(`[page] ${p} → HTTP ${r.status}`);
