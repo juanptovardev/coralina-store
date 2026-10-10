@@ -6,10 +6,10 @@ import { decodeRole } from "@/lib/session-sign";
 // valor plano para no romper las suites locales. Definir CORALINA_SESSION_SECRET
 // (o CORALINA_ADMIN_PASSWORD) en prod; sin secreto se usa un default de dev.
 // Única excepción: /api/admin/session (establece la cookie firmada).
-// Next 16: convención `proxy.ts` (reemplaza `middleware.ts`, deprecado).
+// Next 15: convención `middleware.ts`.
 const PUBLIC_PREFIX = "/api/admin/session";
 
-export default async function proxy(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (pathname === PUBLIC_PREFIX || pathname.startsWith(PUBLIC_PREFIX + "/")) return NextResponse.next();
   const raw = req.cookies.get("coralina_role")?.value;
