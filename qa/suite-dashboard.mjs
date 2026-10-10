@@ -32,7 +32,12 @@ async function req(path, { method = "GET", body, role = "none" } = {}) {
 }
 const g = (p, role = "admin") => req(p, { role });
 const post = (p, body, role = "admin") => req(p, { method: "POST", body, role });
-const noDigest = (r) => typeof r.text === "string" && !r.text.includes("digest");
+// Detector de error boundary: usamos los textos propios (error.tsx / global-error.tsx)
+// en vez de buscar "digest" — el payload RSC de Next incluye `"digest":"$undefined"`
+// en toda página y daría un falso positivo.
+const ERROR_MARKERS = ["mala pasada", "Algo salió mal", "Application error"];
+const noDigest = (r) =>
+  typeof r.text === "string" && !ERROR_MARKERS.some((m) => r.text.includes(m));
 const http = (r, extra = "") => `HTTP ${r.status}${r.err ? ` \u00b7 ${r.err}` : ""}${extra ? ` \u00b7 ${extra}` : ""}`;
 
 const stamp = Date.now();
