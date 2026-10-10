@@ -1,28 +1,17 @@
 import { NextResponse } from "next/server";
 import { passwordMatches } from "@/lib/admin-auth";
 import { db } from "@/db";
-import { customers, inventoryLevels, orderItems, orders, shipments, type OperationalTag } from "@/db/schema";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { customers, orderItems, orders, shipments, type OperationalTag } from "@/db/schema";
+import { desc, eq, inArray } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { OPERATIONAL_TAGS } from "@/lib/constants";
-import { transitionTag, createOrder, buildCartLines } from "@/lib/orders";
+import { transitionTag, createOrder, buildCartLines, restoreStock } from "@/lib/orders";
 import { buildByDay14 } from "@/lib/metrics";
 import { evaluateCart } from "@/lib/promo";
+import { pageParams } from "@/lib/page-params";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 import { normalizeCartItems } from "@/lib/cart-input";
-
-/**
- * ?page= (1-based) + ?pageSize= con tope duro: acota el payload sin romper
- * clientes que no envían los parámetros (devuelven la primera página completa).
- */
-function pageParams(sp: URLSearchParams, defaultSize: number) {
-  const p = Number(sp.get("page"));
-  const s = Number(sp.get("pageSize"));
-  const page = Number.isInteger(p) && p >= 1 ? p : 1;
-  const pageSize = Math.min(200, Number.isInteger(s) && s >= 1 ? s : defaultSize);
-  return { page, pageSize, offset: (page - 1) * pageSize };
-}
 
 export async function GET(req: Request) {
   await ensureSeeded();
@@ -31,11 +20,12 @@ export async function GET(req: Request) {
 
   // Métricas se calculan sobre TODOS los pedidos (semántica intacta); la
   // paginación solo recorta el array `orders` que viaja en la respuesta.
+  // Tiebreaker por id: timestamps empatados no repiten/omiten filas entre páginas.
   const rows = await db
     .select({ o: orders, c: customers })
     .from(orders)
     .innerJoin(customers, eq(customers.id, orders.customerId))
-    .orderBy(desc(orders.createdAt));
+    .orderBy(desc(orders.createdAt), desc(orders.id));
   const total = rows.length;
   const pageRows = rows.slice(offset, offset + pageSize);
 
@@ -203,17 +193,12 @@ export async function POST(req: Request) {
     // (un reintento no repone de nuevo). El audit se escribe tras el commit.
     await db.transaction(async (tx) => {
       // Reponer stock si el pedido NO estaba cancelado: al crearse descontó stock
-        // (un cancelado ya lo repuso una sola vez vía transitionTag).
+      // (un cancelado ya lo repuso una sola vez vía transitionTag).
       // Contrato: solo pedidos creados vía createOrder; los del seed se insertan
       // directo en SQL y no descontaron stock (no se debe inflar inventario).
       if (order.status !== "canceled") {
         const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
-        for (const it of items) {
-          await tx
-            .update(inventoryLevels)
-            .set({ stocked: sql`${inventoryLevels.stocked} + ${it.quantity}`, updatedAt: new Date() })
-            .where(eq(inventoryLevels.variantId, it.variantId));
-        }
+        for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
       }
       await tx.delete(shipments).where(eq(shipments.orderId, id));
       await tx.delete(orderItems).where(eq(orderItems.orderId, id));

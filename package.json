@@ -10,7 +10,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "bun qa/rate-limit.test.ts && bun qa/cart-input.test.ts && bun qa/session-sign.test.ts && bun qa/admin-auth.test.ts && bun qa/db-init.test.ts"
+    "test": "bun qa/rate-limit.test.ts && bun qa/cart-input.test.ts && bun qa/session-sign.test.ts && bun qa/admin-auth.test.ts && bun qa/db-init.test.ts && bun qa/page-params.test.ts"
   },
   "dependencies": {
     "dotenv": "17.3.1",

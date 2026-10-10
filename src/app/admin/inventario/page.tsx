@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Card, PageHeader, Toast, useJson } from "@/components/admin/ui";
+import { Badge, Card, EmptyState, PageHeader, Skeleton, Toast, useDebouncedValue, useJson } from "@/components/admin/ui";
 
 type Summary = {
   categoryId: number;
@@ -40,10 +40,11 @@ export default function InventarioPage() {
   const [q, setQ] = useState("");
   const [toast, setToast] = useState("");
   const [tone, setTone] = useState<"ok" | "error">("ok");
+  const dq = useDebouncedValue(q, 300);
 
   const levels = (data?.levels ?? []).filter((l) => {
     if (category && l.categoryId !== category) return false;
-    if (q && !`${l.productTitle} ${l.sku}`.toLowerCase().includes(q.toLowerCase())) return false;
+    if (dq && !`${l.productTitle} ${l.sku}`.toLowerCase().includes(dq.toLowerCase())) return false;
     return true;
   });
 
@@ -59,10 +60,17 @@ export default function InventarioPage() {
     reload();
   }
 
+  /** CSV seguro: toda celda entrecomillada, comillas internas duplicadas y
+   *  prefijo ' en celdas que empiezan con = + - @ (guardia de inyección). */
   function exportCsv() {
-    const header = "categoria,producto,talla,sku,stock,umbral";
+    const cell = (v: string | number) => {
+      const s = String(v);
+      const guarded = /^[=+@-]/.test(s) ? `'${s}` : s;
+      return `"${guarded.replace(/"/g, '""')}"`;
+    };
+    const header = ["categoria", "producto", "talla", "sku", "stock", "umbral"].map(cell).join(",");
     const body = levels
-      .map((l) => [l.categoryName, l.productTitle, l.size, l.sku, l.stocked, l.threshold].join(","))
+      .map((l) => [l.categoryName, l.productTitle, l.size, l.sku, l.stocked, l.threshold].map(cell).join(","))
       .join("\n");
     const url = URL.createObjectURL(new Blob([`${header}\n${body}`], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -85,7 +93,7 @@ export default function InventarioPage() {
       />
 
       {loading ? (
-        <Card>Cargando inventario…</Card>
+        <Skeleton rows={6} />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -139,8 +147,16 @@ export default function InventarioPage() {
             <span className="text-xs opacity-60">{levels.length} variantes</span>
           </Card>
 
-          <div className="dash-panel dash-scroll mt-4 overflow-auto scroll-thin">
-            <table className="dash-table min-w-[820px]">
+          {levels.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="Sin variantes con esos filtros"
+                hint="Prueba a quitar el filtro de categoría o limpiar la búsqueda."
+              />
+            </div>
+          ) : (
+            <div className="dash-panel dash-scroll mt-4 overflow-auto scroll-thin">
+              <table className="dash-table min-w-[820px]">
               <thead>
                 <tr>
                   <th className="px-4 py-3">Producto</th>
@@ -210,7 +226,8 @@ export default function InventarioPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          )}
         </>
       )}
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, Modal, PageHeader, Toast, useJson } from "@/components/admin/ui";
+import { Badge, Card, EmptyState, Modal, PageHeader, Skeleton, Toast, useJson } from "@/components/admin/ui";
 import type { Actor } from "@/lib/session";
 
 type Entry = {
@@ -31,16 +31,28 @@ const ACTION_TONE: Record<string, "green" | "blue" | "amber" | "red" | "coral" |
   purge_audit: "red",
 };
 
+const AUDIT_PAGE_SIZE = 200;
+
 export default function AuditoriaPage() {
   const [filters, setFilters] = useState({ role: "all", module: "all", action: "all", q: "", from: "", to: "" });
+  const [page, setPage] = useState(1);
   // Debounce del texto libre (280 ms, igual que Clientes): evita un fetch por tecla.
   const [dq, setDq] = useState("");
   useEffect(() => {
     const t = setTimeout(() => setDq(filters.q), 280);
     return () => clearTimeout(t);
   }, [filters.q]);
-  const query = new URLSearchParams({ ...filters, q: dq }).toString();
-  const { data, loading, reload } = useJson<{ entries: Entry[]; purges: Purge[] }>(`/api/admin/audit?${query}`);
+  // Cambio de filtro → volver a la página 1 (siempre, sin mirar cuál cambió).
+  useEffect(() => {
+    setPage(1);
+  }, [filters.role, filters.module, filters.action, dq, filters.from, filters.to]);
+  const query = new URLSearchParams({ ...filters, q: dq, page: String(page), pageSize: String(AUDIT_PAGE_SIZE) }).toString();
+  const { data, loading, reload } = useJson<{
+    entries: Entry[];
+    purges: Purge[];
+    total: number;
+    pageSize: number;
+  }>(`/api/admin/audit?${query}`);
   const { data: actor } = useJson<Actor>("/api/admin/session");
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [month, setMonth] = useState("");
@@ -51,6 +63,7 @@ export default function AuditoriaPage() {
   const [tone, setTone] = useState<"ok" | "error">("ok");
 
   const entries = data?.entries ?? [];
+  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? AUDIT_PAGE_SIZE)));
   const byDay = entries.reduce<Record<string, Entry[]>>((acc, e) => {
     const day = new Date(e.createdAt).toLocaleDateString("es-CO", { dateStyle: "full" });
     (acc[day] ??= []).push(e);
@@ -110,11 +123,15 @@ export default function AuditoriaPage() {
       </Card>
 
       {loading ? (
-        <Card>Cargando bitácora…</Card>
+        <Skeleton rows={7} />
       ) : entries.length === 0 ? (
-        <Card>No hay registros con esos filtros.</Card>
+        <EmptyState
+          title="No hay registros con esos filtros"
+          hint="Prueba a ampliar el rango de fechas o limpiar la búsqueda."
+        />
       ) : (
         <div className="space-y-6">
+          <p className="text-xs opacity-60">{data?.total ?? 0} registros en la bitácora</p>
           {Object.entries(byDay).map(([day, list]) => (
             <div key={day}>
               <p className="admin-label">{day}</p>
@@ -136,6 +153,20 @@ export default function AuditoriaPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {!loading && entries.length > 0 && (
+        <div className="mt-4 flex items-center gap-3 text-xs">
+          <button className="dash-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            Anterior
+          </button>
+          <span>
+            Página {page} de {pages}
+          </span>
+          <button className="dash-btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+            Siguiente
+          </button>
         </div>
       )}
 

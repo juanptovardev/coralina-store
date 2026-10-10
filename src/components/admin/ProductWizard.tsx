@@ -12,25 +12,49 @@ type Cat = {
 
 const STEPS = ["Información", "Categoría y tallas", "Precio e imágenes", "Preview y publicar"];
 
+export type ProductWizardInitial = {
+  id: number;
+  title: string;
+  description: string;
+  categoryId: number;
+  priceCents: number;
+  compareAtCents: number | null;
+  images: string[];
+  tags: string[];
+  status: string;
+  sizes: { size: string; stock: number }[];
+};
+
 export function ProductWizard({
   categories,
   onDone,
+  initial,
 }: {
   categories: Cat[];
   onDone: (message: string, tone: "ok" | "error") => void;
+  initial?: ProductWizardInitial | null;
 }) {
+  const editing = Boolean(initial);
   const [step, setStep] = useState(0);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [categoryId, setCategoryId] = useState<number | 0>(categories[0]?.id ?? 0);
-  const [sizes, setSizes] = useState<Record<string, { on: boolean; stock: number }>>({});
-  const [price, setPrice] = useState("");
-  const [compareAt, setCompareAt] = useState("");
-  const [images, setImages] = useState<string[]>([]);
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [categoryId, setCategoryId] = useState<number | 0>(
+    initial?.categoryId ?? categories[0]?.id ?? 0,
+  );
+  const [sizes, setSizes] = useState<Record<string, { on: boolean; stock: number }>>(() => {
+    const map: Record<string, { on: boolean; stock: number }> = {};
+    for (const s of initial?.sizes ?? []) map[s.size] = { on: true, stock: s.stock };
+    return map;
+  });
+  const [price, setPrice] = useState(initial ? String(initial.priceCents / 100) : "");
+  const [compareAt, setCompareAt] = useState(
+    initial?.compareAtCents ? String(initial.compareAtCents / 100) : "",
+  );
+  const [images, setImages] = useState<string[]>(initial?.images ?? []);
   const [imageInput, setImageInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState("");
-  const [featured, setFeatured] = useState(true);
+  const [featured, setFeatured] = useState(initial ? initial.tags.includes("home") : true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -79,23 +103,38 @@ export function ProductWizard({
     }
   }
 
-  async function submit(status: "draft" | "published") {
+  async function submit(status: "draft" | "published" | "archived") {
     setError("");
-    setBusy(true);    const res = await fetch("/api/admin/catalog", {
+    setBusy(true);
+    const res = await fetch("/api/admin/catalog", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "create_product",
-        title,
-        description,
-        categoryId,
-        priceCents: Math.round(Number(price || 0) * 100),
-        compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
-        images,
-        sizes: activeSizes,
-        tags: featured ? ["home"] : [],
-        status,
-      }),
+      body: JSON.stringify(
+        initial
+          ? {
+              action: "update_product",
+              id: initial.id,
+              title,
+              description,
+              categoryId,
+              priceCents: Math.round(Number(price || 0) * 100),
+              compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
+              images,
+              status,
+            }
+          : {
+              action: "create_product",
+              title,
+              description,
+              categoryId,
+              priceCents: Math.round(Number(price || 0) * 100),
+              compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
+              images,
+              sizes: activeSizes,
+              tags: featured ? ["home"] : [],
+              status,
+            },
+      ),
     });
     const json = await res.json();
     setBusy(false);
@@ -103,7 +142,14 @@ export function ProductWizard({
       setError(json.error ?? "No se pudo guardar.");
       return;
     }
-    onDone(status === "published" ? "Producto publicado en la tienda" : "Borrador guardado", "ok");
+    onDone(
+      initial
+        ? "Producto actualizado"
+        : status === "published"
+          ? "Producto publicado en la tienda"
+          : "Borrador guardado",
+      "ok",
+    );
   }
 
   return (
@@ -140,7 +186,12 @@ export function ProductWizard({
             />
           </div>
           <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={featured} onChange={(e) => setFeatured(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={featured}
+              disabled={editing}
+              onChange={(e) => setFeatured(e.target.checked)}
+            />
             Mostrar en la sección «Lo más deseado» del home (etiqueta <code>home</code>)
           </label>
         </div>
@@ -149,10 +200,11 @@ export function ProductWizard({
       {step === 1 && (
         <div className="space-y-4">
           <div>
-            <label className="admin-label">Categoría (obligatoria)</label>
+            <label className="admin-label">Categoría {editing ? "(no editable al editar)" : "(obligatoria)"}</label>
             <select
               className="admin-input"
               value={categoryId}
+              disabled={editing}
               onChange={(e) => {
                 setCategoryId(Number(e.target.value));
                 setSizes({});
@@ -165,12 +217,13 @@ export function ProductWizard({
               ))}
             </select>
             <p className="mt-1 text-[0.7rem] opacity-60">
-              Las tallas disponibles salen de la tabla de tallas de la categoría. Si necesitas otra
-              medida, edítala en «Categorías y tallas».
+              {editing
+                ? "Mover un producto de categoría cambiaría sus variantes; se gestiona creando uno nuevo."
+                : "Las tallas disponibles salen de la tabla de tallas de la categoría. Si necesitas otra medida, edítala en «Categorías y tallas»."}
             </p>
           </div>
           <div className="card-soft p-4">
-            <p className="admin-label">Tallas a activar y stock inicial</p>
+            <p className="admin-label">{editing ? "Tallas actuales (se editan en Inventario)" : "Tallas a activar y stock inicial"}</p>
             <div className="mt-2 space-y-2">
               {chartRows.length === 0 && (
                 <p className="text-xs opacity-60">Esta categoría no tiene tabla de tallas.</p>
@@ -184,6 +237,7 @@ export function ProductWizard({
                       <input
                         type="checkbox"
                         checked={state.on}
+                        disabled={editing}
                         onChange={(e) => setSizes({ ...sizes, [size]: { ...state, on: e.target.checked } })}
                       />
                       <span className="font-medium">{size}</span>
@@ -191,7 +245,7 @@ export function ProductWizard({
                     <input
                       type="number"
                       min={0}
-                      disabled={!state.on}
+                      disabled={!state.on || editing}
                       className="admin-input max-w-[7rem] disabled:opacity-40"
                       value={state.stock}
                       onChange={(e) => setSizes({ ...sizes, [size]: { ...state, stock: Number(e.target.value) } })}
@@ -315,8 +369,9 @@ export function ProductWizard({
               <Check ok={images.length > 0} text="Al menos una imagen" />
             </ul>
             <p className="mt-4 text-[0.7rem] opacity-60">
-              Al guardar se crean las variantes por talla, sus SKU y su nivel de inventario en la bodega
-              principal. Todo queda en la bitácora.
+              {editing
+                ? "Los cambios se aplican sobre el producto existente y quedan en la bitácora. La descripción y las imágenes solo se guardan al crear (la API de update no las modifica)."
+                : "Al guardar se crean las variantes por talla, sus SKU y su nivel de inventario en la bodega principal. Todo queda en la bitácora."}
             </p>
           </div>
         </div>
@@ -332,6 +387,21 @@ export function ProductWizard({
           <button className="dash-btn dash-btn-primary text-xs" onClick={() => setStep(step + 1)}>
             Siguiente
           </button>
+        ) : initial ? (
+          <div className="flex gap-2">
+            {initial.status !== "published" && (
+              <button className="dash-btn text-xs" disabled={busy} onClick={() => submit("published")}>
+                Guardar y publicar
+              </button>
+            )}
+            <button
+              className="dash-btn dash-btn-primary text-xs"
+              disabled={busy}
+              onClick={() => submit(initial.status as "draft" | "published" | "archived")}
+            >
+              Guardar cambios
+            </button>
+          </div>
         ) : (
           <div className="flex gap-2">
             <button className="dash-btn text-xs" disabled={busy} onClick={() => submit("draft")}>

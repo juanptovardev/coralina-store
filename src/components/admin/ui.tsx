@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export function PageHeader({
   title,
@@ -187,24 +187,109 @@ export function Modal({
   );
 }
 
+type ToastItem = { id: number; message: string; tone: "ok" | "error" };
+
+const toastQueue: ToastItem[] = [];
+const toastListeners = new Set<(items: ToastItem[]) => void>();
+let toastSeq = 0;
+
+function emitToasts() {
+  const snapshot = [...toastQueue];
+  for (const l of toastListeners) l(snapshot);
+}
+
+function pushToast(message: string, tone: "ok" | "error") {
+  const item: ToastItem = { id: ++toastSeq, message, tone };
+  toastQueue.push(item);
+  if (toastQueue.length > 3) toastQueue.shift();
+  emitToasts();
+  setTimeout(() => {
+    const i = toastQueue.indexOf(item);
+    if (i !== -1) toastQueue.splice(i, 1);
+    emitToasts();
+  }, 4200);
+}
+
+/** Cola de toasts: máx 3 apilados, autodescarte por toast. API previa intacta: <Toast message tone />. */
 export function Toast({ message, tone = "ok" }: { message: string; tone?: "ok" | "error" }) {
-  const [visible, setVisible] = useState(true);
+  const [items, setItems] = useState<ToastItem[]>([]);
+  const lastRef = useRef("");
+
   useEffect(() => {
-    setVisible(true);
-    const t = setTimeout(() => setVisible(false), 4200);
-    return () => clearTimeout(t);
-  }, [message]);
-  if (!message || !visible) return null;
+    toastListeners.add(setItems);
+    return () => {
+      toastListeners.delete(setItems);
+    };
+  }, []);
+
+  useEffect(() => {
+    const key = `${tone}:${message}`;
+    if (message && lastRef.current !== key) {
+      lastRef.current = key;
+      pushToast(message, tone);
+    }
+    if (!message) lastRef.current = "";
+  }, [message, tone]);
+
+  if (items.length === 0) return null;
   return (
-    <div
-      role="status"
-      className={`fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-lg px-4 py-2.5 text-[0.8rem] font-medium text-white shadow-xl ${
-        tone === "ok" ? "bg-[var(--d-bg)]" : "bg-[var(--d-danger)]"
-      }`}
-    >
-      <span>{tone === "ok" ? "✓" : "!"}</span>
-      {message}
+    <div className="fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 flex-col items-center gap-2">
+      {items.map((t) => (
+        <div
+          key={t.id}
+          role="status"
+          className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-[0.8rem] font-medium text-white shadow-xl ${
+            t.tone === "ok" ? "bg-[var(--d-bg)]" : "bg-[var(--d-danger)]"
+          }`}
+        >
+          <span>{t.tone === "ok" ? "✓" : "!"}</span>
+          {t.message}
+        </div>
+      ))}
     </div>
+  );
+}
+
+/** Confirmación propia (reemplaza confirm() nativo) para acciones destructivas suaves. */
+export function ConfirmDialog({
+  open,
+  onClose,
+  title,
+  message,
+  subtitle = "Queda auditado en la bitácora",
+  confirmLabel = "Confirmar",
+  danger,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  subtitle?: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} subtitle={subtitle}>
+      <div className="space-y-4 text-[0.85rem]">
+        <p>{message}</p>
+        <div className="flex justify-end gap-2">
+          <button className="dash-btn" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className={danger ? "dash-btn dash-btn-danger" : "dash-btn dash-btn-primary"}
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -382,4 +467,34 @@ export function useJson<T>(url: string) {
   }, [url, nonce]);
 
   return { data, loading, error, reload: () => setNonce((n) => n + 1) };
+}
+
+/** Estado "ocupado" + guardia anti doble-submit para botones de mutación. */
+export function useBusy(): { busy: boolean; run: <T>(fn: () => Promise<T>) => Promise<T | undefined> } {
+  const [busy, setBusy] = useState(false);
+  const inflight = useRef(false);
+
+  async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    if (inflight.current) return undefined;
+    inflight.current = true;
+    setBusy(true);
+    try {
+      return await fn();
+    } finally {
+      inflight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return { busy, run };
+}
+
+/** Debounce genérico para inputs de búsqueda/filtros client-side. */
+export function useDebouncedValue<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
 }

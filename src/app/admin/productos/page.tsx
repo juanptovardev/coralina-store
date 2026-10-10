@@ -5,11 +5,15 @@ import Link from "next/link";
 import {
   Badge,
   Card,
+  ConfirmDialog,
   EmptyState,
   HardDeleteDialog,
   Modal,
   PageHeader,
+  Skeleton,
   Toast,
+  useBusy,
+  useDebouncedValue,
   useJson,
 } from "@/components/admin/ui";
 import { ProductWizard } from "@/components/admin/ProductWizard";
@@ -35,10 +39,19 @@ export default function ProductosPage() {
   const [toast, setToast] = useState("");
   const [toastTone, setToastTone] = useState<"ok" | "error">("ok");
   const [target, setTarget] = useState<StoreProduct | null>(null);
+  const [editing, setEditing] = useState<StoreProduct | null>(null);
   const [filter, setFilter] = useState("");
+  const [confirmBox, setConfirmBox] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    onOk: () => void;
+  } | null>(null);
+  const { busy, run } = useBusy();
+  const dFilter = useDebouncedValue(filter, 300);
 
   const products = (data?.products ?? []).filter((p) =>
-    p.title.toLowerCase().includes(filter.toLowerCase()),
+    p.title.toLowerCase().includes(dFilter.toLowerCase()),
   );
 
   async function call(body: Record<string, unknown>): Promise<string | null> {
@@ -83,7 +96,7 @@ export default function ProductosPage() {
       </Card>
 
       {loading ? (
-        <Card>Cargando catálogo…</Card>
+        <Skeleton rows={6} />
       ) : products.length === 0 ? (
         <EmptyState
           title="Aún no hay productos"
@@ -145,25 +158,43 @@ export default function ProductosPage() {
                     <div className="flex justify-end gap-2">
                       <button
                         className="dash-btn px-2.5 py-1"
-                        onClick={async () => {
-                          const err = await call({
-                            action: "update_product",
-                            id: p.id,
-                            status: p.status === "published" ? "draft" : "published",
-                          });
-                          setToastTone(err ? "error" : "ok");
-                          setToast(err ?? (p.status === "published" ? "Producto despublicado" : "Producto publicado"));
-                        }}
+                        onClick={() => setEditing(p)}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        className="dash-btn px-2.5 py-1"
+                        disabled={busy}
+                        onClick={() =>
+                          run(async () => {
+                            const err = await call({
+                              action: "update_product",
+                              id: p.id,
+                              status: p.status === "published" ? "draft" : "published",
+                            });
+                            setToastTone(err ? "error" : "ok");
+                            setToast(err ?? (p.status === "published" ? "Producto despublicado" : "Producto publicado"));
+                          })
+                        }
                       >
                         {p.status === "published" ? "Despublicar" : "Publicar"}
                       </button>
                       <button
                         className="dash-btn px-2.5 py-1"
-                        onClick={async () => {
-                          const err = await call({ action: "delete_product", id: p.id, hard: false });
-                          setToastTone(err ? "error" : "ok");
-                          setToast(err ?? "Producto archivado");
-                        }}
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirmBox({
+                            title: "Archivar producto",
+                            message: `«${p.title}» dejará de verse en la tienda (estado archived). Se puede volver a publicar. ¿Confirmas?`,
+                            confirmLabel: "Archivar",
+                            onOk: () =>
+                              run(async () => {
+                                const err = await call({ action: "delete_product", id: p.id, hard: false });
+                                setToastTone(err ? "error" : "ok");
+                                setToast(err ?? "Producto archivado");
+                              }),
+                          })
+                        }
                       >
                         Archivar
                       </button>
@@ -182,7 +213,12 @@ export default function ProductosPage() {
         </div>
       )}
 
-      <Modal open={wizard} onClose={() => setWizard(false)} title="Añadir producto" wide>
+      <Modal
+        open={wizard}
+        onClose={() => setWizard(false)}
+        title="Añadir producto"
+        wide
+      >
         <ProductWizard
           categories={data?.categories ?? []}
           onDone={(msg, tone) => {
@@ -193,6 +229,46 @@ export default function ProductosPage() {
           }}
         />
       </Modal>
+
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing ? `Editar · ${editing.title}` : "Editar producto"}
+        wide
+      >
+        {editing && (
+          <ProductWizard
+            categories={data?.categories ?? []}
+            initial={{
+              id: editing.id,
+              title: editing.title,
+              description: editing.description,
+              categoryId: editing.categoryId,
+              priceCents: editing.priceCents,
+              compareAtCents: editing.compareAtCents,
+              images: editing.images,
+              tags: editing.tags,
+              status: editing.status,
+              sizes: editing.variants.map((v) => ({ size: v.size, stock: v.stock })),
+            }}
+            onDone={(msg, tone) => {
+              setEditing(null);
+              setToastTone(tone);
+              setToast(msg);
+              reload();
+            }}
+          />
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmBox !== null}
+        onClose={() => setConfirmBox(null)}
+        title={confirmBox?.title ?? ""}
+        message={confirmBox?.message ?? ""}
+        confirmLabel={confirmBox?.confirmLabel ?? "Confirmar"}
+        onConfirm={() => confirmBox?.onOk()}
+      />
 
       <HardDeleteDialog
         open={Boolean(target)}

@@ -4,6 +4,7 @@ import { auditLog, auditPurges } from "@/db/schema";
 import { and, desc, eq, gte, ilike, lt, or, sql, type SQL } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { passwordMatches } from "@/lib/admin-auth";
+import { pageParams } from "@/lib/page-params";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 
@@ -40,18 +41,9 @@ function cell(v: unknown): string {
 }
 
 /**
- * ?page= (1-based) + ?pageSize= con tope duro: acota el payload sin romper
- * clientes que no envían los parámetros (devuelven la primera página completa).
+ * Tope del export CSV: streaming-safe (ignora paginación).
+ * Si se alcanza, el nombre del archivo lo marca (`-truncado`).
  */
-function pageParams(sp: URLSearchParams, defaultSize: number) {
-  const p = Number(sp.get("page"));
-  const s = Number(sp.get("pageSize"));
-  const page = Number.isInteger(p) && p >= 1 ? p : 1;
-  const pageSize = Math.min(200, Number.isInteger(s) && s >= 1 ? s : defaultSize);
-  return { page, pageSize, offset: (page - 1) * pageSize };
-}
-
-/** Tope del export CSV: streaming-safe (ignora paginación). */
 const CSV_EXPORT_LIMIT = 5000;
 
 export async function GET(req: Request) {
@@ -65,7 +57,7 @@ export async function GET(req: Request) {
       .select()
       .from(auditLog)
       .where(where)
-      .orderBy(desc(auditLog.createdAt))
+      .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
       .limit(CSV_EXPORT_LIMIT);
     const header = "fecha,actor,rol,modulo,entidad,entidad_id,accion,campo,resumen";
     const body = rows
@@ -85,10 +77,11 @@ export async function GET(req: Request) {
           .join(","),
       )
       .join("\n");
+    const truncated = rows.length >= CSV_EXPORT_LIMIT;
     return new NextResponse(`${header}\n${body}`, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="coralina-auditoria.csv"`,
+        "content-disposition": `attachment; filename="coralina-auditoria${truncated ? "-truncado" : ""}.csv"`,
       },
     });
   }
@@ -102,7 +95,7 @@ export async function GET(req: Request) {
     .select()
     .from(auditLog)
     .where(where)
-    .orderBy(desc(auditLog.createdAt))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(pageSize)
     .offset(offset);
 

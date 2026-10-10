@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, EmptyState, Modal, PageHeader, Toast, useJson } from "@/components/admin/ui";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  HardDeleteDialog,
+  Modal,
+  PageHeader,
+  Skeleton,
+  Toast,
+  useBusy,
+  useJson,
+} from "@/components/admin/ui";
 import { formatCOP } from "@/lib/constants";
 import type { StoreProduct } from "@/lib/queries";
+import type { Actor } from "@/lib/session";
 
 type Promo = {
   id: number;
@@ -37,9 +49,13 @@ export default function PromosPage() {
   const { data: catalog } = useJson<{ categories: { id: number; name: string }[]; products: StoreProduct[] }>(
     "/api/admin/catalog",
   );
+  const { data: actor } = useJson<Actor>("/api/admin/session");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [target, setTarget] = useState<Promo | null>(null);
   const [toast, setToast] = useState("");
   const [tone, setTone] = useState<"ok" | "error">("ok");
+  const { busy, run } = useBusy();
   const [form, setForm] = useState({
     name: "",
     type: "category_percent",
@@ -79,16 +95,18 @@ export default function PromosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, data]);
 
-  async function post(body: Record<string, unknown>) {
+  async function post(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
     const res = await fetch("/api/admin/promos", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     const json = await res.json();
-    setTone(json.ok ? "ok" : "error");
-    setToast(json.ok ? "Listo" : json.error);
-    if (json.ok) reload();
+    const ok = Boolean(res.ok && json.ok);
+    setTone(ok ? "ok" : "error");
+    setToast(ok ? "Listo" : json.error);
+    if (ok) reload();
+    return { ok, error: ok ? undefined : json.error };
   }
 
   const promos = data?.promotions ?? [];
@@ -99,7 +117,13 @@ export default function PromosPage() {
         title="Promos y combos"
         subtitle="Un solo motor de evaluación: lo que ves aquí es exactamente lo que calcula el carrito de la tienda. Prioridad menor = se aplica primero."
         actions={
-          <button className="dash-btn dash-btn-primary" onClick={() => setCreating(true)}>
+          <button
+            className="dash-btn dash-btn-primary"
+            onClick={() => {
+              setCreateError("");
+              setCreating(true);
+            }}
+          >
             + Nueva promoción
           </button>
         }
@@ -107,14 +131,17 @@ export default function PromosPage() {
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         <div>
-          {loading ? (
-            <Card>Cargando…</Card>
-          ) : promos.length === 0 ? (
+      {loading ? (
+        <Skeleton rows={5} />
+      ) : promos.length === 0 ? (
             <EmptyState
               title="Sin promociones"
               hint="Crea un % por categoría o un combo de dos piezas."
               actionLabel="Nueva promoción"
-              onAction={() => setCreating(true)}
+              onAction={() => {
+                setCreateError("");
+                setCreating(true);
+              }}
             />
           ) : (
             <div className="space-y-3">
@@ -143,18 +170,14 @@ export default function PromosPage() {
                   <div className="flex gap-2">
                     <button
                       className="dash-btn px-2.5 py-1"
-                      onClick={() => post({ action: "toggle", id: p.id })}
+                      disabled={busy}
+                      onClick={() => run(() => post({ action: "toggle", id: p.id }))}
                     >
                       {p.enabled ? "Pausar" : "Activar"}
                     </button>
                     <button
                       className="dash-btn dash-btn-danger px-2.5 py-1"
-                      onClick={() => {
-                        if (confirm(`¿Eliminar «${p.name}»?`)) {
-                          const pw = window.prompt("Clave del admin para confirmar el borrado:");
-                          if (pw !== null) post({ action: "delete", id: p.id, password: pw });
-                        }
-                      }}
+                      onClick={() => setTarget(p)}
                     >
                       Eliminar
                     </button>
@@ -318,27 +341,56 @@ export default function PromosPage() {
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
               />
             </div>
+            {createError && (
+              <p className="rounded-lg border border-[#b3261e]/35 bg-[#fdf0ee] p-2.5 text-xs text-[var(--d-danger)]">
+                {createError}
+              </p>
+            )}
             <button
               className="dash-btn dash-btn-primary w-full"
+              disabled={busy}
               onClick={async () => {
                 // minQty solo es editable para combo; para el resto debe nacer
                 // neutral (0) o el server exigiría unidades que el drawer no
                 // advertía antes del fix de minQty. El código se normaliza en
                 // la frontera (trim + upper) igual que en la API.
-                await post({
+                setCreateError("");
+                const res = await post({
                   action: "create",
                   ...form,
                   minQty: form.type === "combo" ? form.minQty : 0,
                   code: form.code.trim().toUpperCase(),
                 });
+                if (!res.ok) {
+                  setCreateError(res.error ?? "No se pudo crear la promoción.");
+                  return;
+                }
                 setCreating(false);
               }}
             >
-              Crear promoción
+              {busy ? "Creando…" : "Crear promoción"}
             </button>
           </div>
         </div>
       </Modal>
+
+      <HardDeleteDialog
+        open={Boolean(target)}
+        onClose={() => setTarget(null)}
+        canHardDelete={Boolean(actor?.canHardDelete)}
+        entityLabel={`promoción «${target?.name ?? ""}»`}
+        expectedText={target?.name ?? ""}
+        description="La promoción se elimina definitivamente del motor de precios. Si solo quieres detenerla, usa Pausar."
+        onConfirm={async (_confirmText, password) => {
+          const { ok, error } = await post({ action: "delete", id: target?.id, password });
+          if (ok) {
+            setTone("ok");
+            setToast("Promoción eliminada definitivamente");
+            return null;
+          }
+          return error ?? "No se pudo eliminar la promoción.";
+        }}
+      />
 
       <Toast message={toast} tone={tone} />
     </div>

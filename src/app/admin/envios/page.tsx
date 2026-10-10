@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Badge, Card, Drawer, Modal, PageHeader, Stat, Toast, useJson } from "@/components/admin/ui";
+import { Badge, Card, Drawer, Modal, PageHeader, Stat, Toast, useBusy, useJson } from "@/components/admin/ui";
 import { SHIPMENT_COLUMNS, formatCOP } from "@/lib/constants";
 
 type Trace = { status: string; at: string; by: string };
@@ -88,6 +88,7 @@ export default function EnviosPage() {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [reactivateId, setReactivateId] = useState<number | null>(null);
+  const { busy, run } = useBusy();
 
   const reloadRef = useRef(reload);
   useEffect(() => {
@@ -152,7 +153,16 @@ export default function EnviosPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "run_archive_job" }),
     });
-    const json = await res.json();
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      archived?: number;
+      error?: string;
+    };
+    if (!res.ok || !json.ok) {
+      setTone("error");
+      setToast(json.error ?? `No se pudo ejecutar el job de archivado (HTTP ${res.status})`);
+      return;
+    }
     setTone("ok");
     setToast(`Job de archivado: ${json.archived} tarjeta(s) archivadas`);
     reloadRef.current();
@@ -174,8 +184,8 @@ export default function EnviosPage() {
             <button className="dash-btn" onClick={() => reloadRef.current()}>
               ↻ Sincronizar
             </button>
-            <button className="dash-btn" onClick={runArchiveJob}>
-              Ejecutar job 24h
+            <button className="dash-btn" onClick={() => run(() => runArchiveJob())} disabled={busy}>
+              {busy ? "Ejecutando…" : "Ejecutar job 24h"}
             </button>
           </>
         }

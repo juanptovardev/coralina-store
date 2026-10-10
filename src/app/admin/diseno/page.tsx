@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, PageHeader, Toast, useJson } from "@/components/admin/ui";
+import { Badge, Card, ConfirmDialog, PageHeader, Skeleton, Toast, useBusy, useJson } from "@/components/admin/ui";
 import { LayoutZoneGuide } from "@/components/admin/LayoutZoneGuide";
 import { HomeRenderer, type HomeCategory, type HomeProduct } from "@/components/storefront/HomeRenderer";
 import { StoreProvider } from "@/components/storefront/shop";
@@ -56,6 +56,8 @@ export default function DisenoPage() {
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [toast, setToast] = useState("");
   const [tone, setTone] = useState<"ok" | "error">("ok");
+  const [resetColors, setResetColors] = useState(false);
+  const { busy, run } = useBusy();
 
   const layouts = data?.layouts ?? [];
 
@@ -131,7 +133,7 @@ export default function DisenoPage() {
       />
 
       {loading || !draft ? (
-        <Card>Cargando editor…</Card>
+        <Skeleton rows={6} />
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -405,10 +407,14 @@ export default function DisenoPage() {
                   ))}
                 </div>
                 <div className="mt-3 flex gap-2">
-                  <button className="dash-btn dash-btn-primary" onClick={() => post({ action: "save_tokens", tokens })}>
+                  <button
+                    className="dash-btn dash-btn-primary"
+                    disabled={busy}
+                    onClick={() => run(() => post({ action: "save_tokens", tokens }))}
+                  >
                     Guardar colores
                   </button>
-                  <button className="dash-btn" onClick={() => post({ action: "reset_tokens" })}>
+                  <button className="dash-btn" disabled={busy} onClick={() => setResetColors(true)}>
                     Reset a marca
                   </button>
                 </div>
@@ -432,35 +438,40 @@ export default function DisenoPage() {
                 <div className="flex gap-2">
                   <button
                     className="dash-btn"
+                    disabled={busy}
                     onClick={() =>
-                      post({
-                        action: "save_layout",
-                        id: draft.id,
-                        name: draft.name,
-                        banner: draft.banner,
-                        widgets: draft.widgets,
-                        sections: draft.sections,
-                      })
+                      run(() =>
+                        post({
+                          action: "save_layout",
+                          id: draft.id,
+                          name: draft.name,
+                          banner: draft.banner,
+                          widgets: draft.widgets,
+                          sections: draft.sections,
+                        }),
+                      )
                     }
                   >
-                    Guardar borrador
+                    {busy ? "Guardando…" : "Guardar borrador"}
                   </button>
                   <button
                     className="dash-btn dash-btn-primary"
-                    disabled={!canPublish}
-                    onClick={async () => {
-                      const saved = await post({
-                        action: "save_layout",
-                        id: draft.id,
-                        name: draft.name,
-                        banner: draft.banner,
-                        widgets: draft.widgets,
-                        sections: draft.sections,
-                      });
-                      if (saved) await post({ action: "publish", id: draft.id });
-                    }}
+                    disabled={!canPublish || busy}
+                    onClick={() =>
+                      run(async () => {
+                        const saved = await post({
+                          action: "save_layout",
+                          id: draft.id,
+                          name: draft.name,
+                          banner: draft.banner,
+                          widgets: draft.widgets,
+                          sections: draft.sections,
+                        });
+                        if (saved) await post({ action: "publish", id: draft.id });
+                      })
+                    }
                   >
-                    Publicar como home
+                    {busy ? "Publicando…" : "Publicar como home"}
                   </button>
                 </div>
               </Card>
@@ -506,6 +517,15 @@ export default function DisenoPage() {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={resetColors}
+        onClose={() => setResetColors(false)}
+        title="Reset de colores a marca"
+        message="Devuelve todos los colores a los valores de marca por defecto. Los personalizados se pierden. ¿Confirmas?"
+        confirmLabel="Resetear"
+        onConfirm={() => run(() => post({ action: "reset_tokens" }))}
+      />
 
       <Toast message={toast} tone={tone} />
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, EmptyState, Modal, PageHeader, Toast, useJson } from "@/components/admin/ui";
+import { Card, ConfirmDialog, EmptyState, Modal, PageHeader, Skeleton, Toast, useBusy, useJson } from "@/components/admin/ui";
 import type { SizeChartColumn, SizeChartRow } from "@/db/schema";
 
 type Cat = {
@@ -25,6 +25,13 @@ export default function CategoriasPage() {
   const [tone, setTone] = useState<"ok" | "error">("ok");
   const [creating, setCreating] = useState(false);
   const [newCat, setNewCat] = useState({ name: "", description: "", imageUrl: "", inherit: 0 });
+  const [confirmBox, setConfirmBox] = useState<{
+    title: string;
+    message: string;
+    subtitle?: string;
+    onOk: () => void;
+  } | null>(null);
+  const { busy, run } = useBusy();
 
   const cats = data?.categories ?? [];
   const current = cats.find((c) => c.id === selected) ?? null;
@@ -95,7 +102,7 @@ export default function CategoriasPage() {
       />
 
       {loading ? (
-        <Card>Cargando…</Card>
+        <Skeleton rows={5} />
       ) : cats.length === 0 ? (
         <EmptyState
           title="No hay categorías"
@@ -166,16 +173,23 @@ export default function CategoriasPage() {
                             {!c.locked && (
                               <button
                                 className="mt-1 text-[0.65rem] text-[var(--d-danger)]"
-                                onClick={() => {
-                                  setColumns(columns.filter((x) => x.key !== c.key));
-                                  setRows(
-                                    rows.map((r) => {
-                                      const copy = { ...r };
-                                      delete copy[c.key];
-                                      return copy;
-                                    }),
-                                  );
-                                }}
+                                onClick={() =>
+                                  setConfirmBox({
+                                    title: "Quitar columna",
+                                    message: `Quitarás la columna «${c.label}» de la tabla local. Se aplica al guardar. ¿Confirmas?`,
+                                    subtitle: "Solo se persiste al pulsar «Guardar tabla»",
+                                    onOk: () => {
+                                      setColumns(columns.filter((x) => x.key !== c.key));
+                                      setRows(
+                                        rows.map((r) => {
+                                          const copy = { ...r };
+                                          delete copy[c.key];
+                                          return copy;
+                                        }),
+                                      );
+                                    },
+                                  })
+                                }
                               >
                                 quitar columna
                               </button>
@@ -207,8 +221,15 @@ export default function CategoriasPage() {
                           <td className="px-2">
                             <button
                               className="text-xs text-[var(--d-danger)]"
-                              onClick={() => setRows(rows.filter((_, i) => i !== ri))}
                               title="Quitar talla (bloqueado si tiene stock o ventas)"
+                              onClick={() =>
+                                setConfirmBox({
+                                  title: "Quitar talla",
+                                  message: `Quitarás la talla «${String(r.size)}» de la tabla local. Se aplica al guardar; si la talla tiene stock o ventas, el sistema lo bloqueará.`,
+                                  subtitle: "Solo se persiste al pulsar «Guardar tabla»",
+                                  onOk: () => setRows(rows.filter((_, i) => i !== ri)),
+                                })
+                              }
                             >
                               ✕
                             </button>
@@ -243,7 +264,11 @@ export default function CategoriasPage() {
                 </label>
 
                 <div className="mt-4 flex items-center gap-3">
-                  <button className="dash-btn dash-btn-primary" onClick={save}>
+                  <button
+                    className="dash-btn dash-btn-primary"
+                    disabled={busy}
+                    onClick={() => run(save)}
+                  >
                     Guardar tabla
                   </button>
                   <p className="text-[0.7rem] opacity-60">
@@ -301,32 +326,44 @@ export default function CategoriasPage() {
           </div>
           <button
             className="dash-btn dash-btn-primary w-full"
-            onClick={async () => {
-              const res = await fetch("/api/admin/catalog", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                  action: "create_category",
-                  name: newCat.name,
-                  description: newCat.description,
-                  imageUrl: newCat.imageUrl,
-                  inheritFromCategoryId: newCat.inherit,
-                }),
-              });
-              const json = await res.json();
-              setTone(json.ok ? "ok" : "error");
-              setToast(json.ok ? "Categoría creada" : json.error);
-              if (json.ok) {
-                setCreating(false);
-                setNewCat({ name: "", description: "", imageUrl: "", inherit: 0 });
-                reload();
-              }
-            }}
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                const res = await fetch("/api/admin/catalog", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    action: "create_category",
+                    name: newCat.name,
+                    description: newCat.description,
+                    imageUrl: newCat.imageUrl,
+                    inheritFromCategoryId: newCat.inherit,
+                  }),
+                });
+                const json = await res.json();
+                setTone(json.ok ? "ok" : "error");
+                setToast(json.ok ? "Categoría creada" : json.error);
+                if (json.ok) {
+                  setCreating(false);
+                  setNewCat({ name: "", description: "", imageUrl: "", inherit: 0 });
+                  reload();
+                }
+              })
+            }
           >
             Crear categoría
           </button>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmBox !== null}
+        onClose={() => setConfirmBox(null)}
+        title={confirmBox?.title ?? ""}
+        message={confirmBox?.message ?? ""}
+        subtitle={confirmBox?.subtitle}
+        onConfirm={() => confirmBox?.onOk()}
+      />
 
       <Toast message={toast} tone={tone} />
     </div>

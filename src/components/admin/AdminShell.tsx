@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CoralinaMark } from "@/components/sea";
+import { Modal } from "@/components/admin/ui";
 import type { Actor } from "@/lib/session";
 
 const NAV: { href: string; label: string; icon: ReactNode; group: string }[] = [
@@ -27,26 +28,41 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [roleModal, setRoleModal] = useState<"admin" | "asesor" | null>(null);
+  const [rolePassword, setRolePassword] = useState("");
+  const [roleError, setRoleError] = useState("");
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  async function switchRole(role: "admin" | "asesor") {
+  function askRole(role: "admin" | "asesor") {
     if (role === actor.role) return;
-    const password =
-      role === "admin"
-        ? window.prompt("Clave del admin para cambiar de rol:")
-        : undefined;
-    if (role === "admin" && password === null) return;
+    setRoleModal(role);
+    setRolePassword("");
+    setRoleError("");
+  }
+
+  async function confirmRole() {
+    if (!roleModal) return;
+    const role = roleModal;
     setSwitching(true);
+    setRoleError("");
     try {
-      await fetch("/api/admin/session", {
+      const res = await fetch("/api/admin/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role, password }),
+        body: JSON.stringify({ role, password: role === "admin" ? rolePassword : undefined }),
       });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        setRoleError(json.error ?? "No se pudo cambiar el rol.");
+        return;
+      }
+      setRoleModal(null);
       router.refresh();
+    } catch {
+      setRoleError("Error de red al cambiar el rol.");
     } finally {
       setTimeout(() => setSwitching(false), 600);
     }
@@ -145,7 +161,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
               <button
                 key={r}
                 disabled={switching}
-                onClick={() => switchRole(r)}
+                onClick={() => askRole(r)}
                 className={`flex-1 rounded-md px-2 py-1 font-semibold capitalize transition ${
                   actor.role === r ? "bg-white text-[var(--d-bg)]" : "text-white/60 hover:text-white"
                 }`}
@@ -194,6 +210,46 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
         </header>
         <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </div>
+
+      {/* ---------- modal de cambio de rol ---------- */}
+      <Modal
+        open={roleModal !== null}
+        onClose={() => setRoleModal(null)}
+        title="Cambiar rol de sesión"
+        subtitle={roleModal === "admin" ? "Requiere reautenticación con la clave del admin" : "No requiere clave"}
+      >
+        <div className="space-y-4 text-sm">
+          {roleModal === "admin" && (
+            <div>
+              <label className="admin-label">Clave del admin</label>
+              <input
+                type="password"
+                className="admin-input mt-1"
+                value={rolePassword}
+                autoFocus
+                placeholder="••••••••"
+                onChange={(e) => setRolePassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && rolePassword && !switching) void confirmRole();
+                }}
+              />
+            </div>
+          )}
+          {roleError && <p className="text-xs text-[var(--d-danger)]">{roleError}</p>}
+          <div className="flex justify-end gap-2">
+            <button className="dash-btn" onClick={() => setRoleModal(null)}>
+              Cancelar
+            </button>
+            <button
+              className="dash-btn dash-btn-primary"
+              disabled={switching || (roleModal === "admin" && !rolePassword)}
+              onClick={() => void confirmRole()}
+            >
+              {switching ? "Cambiando…" : `Cambiar a ${roleModal ?? ""}`}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

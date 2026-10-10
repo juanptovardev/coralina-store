@@ -4,13 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Card,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   HardDeleteDialog,
   Modal,
   PageHeader,
+  Skeleton,
   Stat,
   Toast,
+  useBusy,
+  useDebouncedValue,
   useJson,
 } from "@/components/admin/ui";
 import { OPERATIONAL_TAGS, TAG_FLOW, formatCOP } from "@/lib/constants";
@@ -78,6 +82,8 @@ export default function PedidosPage() {
     message: string;
     onOk: () => void;
   } | null>(null);
+  const { busy, run } = useBusy();
+  const dq = useDebouncedValue(q, 300);
 
   const metrics: Metrics = data?.metrics ?? {
     today: 0,
@@ -93,7 +99,7 @@ export default function PedidosPage() {
     if (tagFilter !== "all" && o.operationalTag !== tagFilter) return false;
     if (classFilter !== "all" && o.fulfillmentClass !== classFilter) return false;
     if (sourceFilter !== "all" && o.source !== sourceFilter) return false;
-    if (q && !`${o.displayId} ${o.customer.name} ${o.customer.email}`.toLowerCase().includes(q.toLowerCase()))
+    if (dq && !`${o.displayId} ${o.customer.name} ${o.customer.email}`.toLowerCase().includes(dq.toLowerCase()))
       return false;
     return true;
   });
@@ -291,14 +297,16 @@ export default function PedidosPage() {
               </select>
               <button
                 className="dash-btn dash-btn-primary py-1"
+                disabled={busy}
                 onClick={() => {
                   if (!bulkTag) {
                     setTone("error");
                     setToast("Elige un estado primero");
                     return;
                   }
+                  const tag = bulkTag;
                   setBulkTag("");
-                  void bulkApply(bulkTag);
+                  void run(() => bulkApply(tag));
                 }}
               >
                 Aplicar
@@ -310,7 +318,9 @@ export default function PedidosPage() {
           )}
 
           {loading ? (
-            <Card className="mt-5">Cargando pedidos…</Card>
+            <div className="mt-5">
+              <Skeleton rows={6} />
+            </div>
           ) : orders.length === 0 ? (
             <div className="mt-5">
               <EmptyState
@@ -386,10 +396,14 @@ export default function PedidosPage() {
                         <select
                           className="admin-input max-w-[10rem] py-1 text-xs"
                           value={o.operationalTag}
-                          onChange={async (e) => {
-                            const err = await post({ action: "set_tag", orderId: o.id, tag: e.target.value });
-                            setTone(err ? "error" : "ok");
-                            setToast(err ?? `Pedido ${o.displayId} → ${e.target.value}`);
+                          disabled={busy}
+                          onChange={(e) => {
+                            const tag = e.target.value;
+                            void run(async () => {
+                              const err = await post({ action: "set_tag", orderId: o.id, tag });
+                              setTone(err ? "error" : "ok");
+                              setToast(err ?? `Pedido ${o.displayId} → ${tag}`);
+                            });
                           }}
                         >
                           {OPERATIONAL_TAGS.map((t) => (
@@ -469,10 +483,11 @@ export default function PedidosPage() {
                 {TAG_FLOW.map((t) => (
                   <button
                     key={t}
-                    className={`chip border ${open.operationalTag === t ? "border-[var(--d-accent)] bg-[var(--d-accent)] text-white" : "border-[var(--d-line)]"}`}
+                    disabled={busy}
+                    className={`chip border disabled:opacity-50 ${open.operationalTag === t ? "border-[var(--d-accent)] bg-[var(--d-accent)] text-white" : "border-[var(--d-line)]"}`}
                     onClick={() => {
                       const back = TAG_FLOW.indexOf(t) < TAG_FLOW.indexOf(open.operationalTag as never);
-                      const run = async () => {
+                      const apply = async () => {
                         const err = await post({ action: "set_tag", orderId: open.id, tag: t });
                         setTone(err ? "error" : "ok");
                         setToast(err ?? "Estado actualizado");
@@ -483,10 +498,10 @@ export default function PedidosPage() {
                           title: "Mover hacia atrás",
                           message:
                             "Vas a mover el pedido hacia atrás en el flujo. ¿Confirmas? Queda en la bitácora.",
-                          onOk: run,
+                          onOk: () => void run(apply),
                         });
                       } else {
-                        void run();
+                        void run(apply);
                       }
                     }}
                   >
@@ -494,7 +509,8 @@ export default function PedidosPage() {
                   </button>
                 ))}
                 <button
-                  className="chip border border-red-200 text-[var(--d-danger)]"
+                  className="chip border border-red-200 text-[var(--d-danger)] disabled:opacity-50"
+                  disabled={busy}
                   onClick={() => {
                     setConfirmBox({
                       title: "Cancelar pedido",
@@ -536,9 +552,9 @@ export default function PedidosPage() {
                 className="admin-input mt-1 h-20"
                 defaultValue={open.notes}
                 onBlur={async (e) => {
-                  await post({ action: "save_notes", orderId: open.id, notes: e.target.value });
-                  setTone("ok");
-                  setToast("Notas guardadas");
+                  const err = await post({ action: "save_notes", orderId: open.id, notes: e.target.value });
+                  setTone(err ? "error" : "ok");
+                  setToast(err ?? "Notas guardadas");
                 }}
               />
             </Card>
@@ -582,31 +598,14 @@ export default function PedidosPage() {
         }}
       />
 
-      {/* Confirmación propia (reemplaza confirm() nativo) */}
-      <Modal
+      {/* Confirmación propia (reemplaza confirm() nativo) — ConfirmDialog en ui.tsx */}
+      <ConfirmDialog
         open={confirmBox !== null}
         onClose={() => setConfirmBox(null)}
         title={confirmBox?.title ?? ""}
-        subtitle="Queda auditado en la bitácora"
-      >
-        <div className="space-y-4 text-[0.85rem]">
-          <p>{confirmBox?.message}</p>
-          <div className="flex justify-end gap-2">
-            <button className="dash-btn" onClick={() => setConfirmBox(null)}>
-              Cancelar
-            </button>
-            <button
-              className="dash-btn dash-btn-primary"
-              onClick={() => {
-                confirmBox?.onOk();
-                setConfirmBox(null);
-              }}
-            >
-              Confirmar
-            </button>
-          </div>
-        </div>
-      </Modal>
+        message={confirmBox?.message ?? ""}
+        onConfirm={() => confirmBox?.onOk()}
+      />
 
       <Toast message={toast} tone={tone} />
     </div>

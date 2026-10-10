@@ -156,6 +156,8 @@ export async function POST(req: Request) {
         stackable: false,
         enabled: promo.enabled !== false,
         code: String(promo.code ?? "").trim().toUpperCase(),
+        // Default "ahora" solo aplica en create: en update el merge garantiza
+        // que startsAt siempre trae el valor guardado (el "" cae en el `||`).
         startsAt: startsAt ?? new Date(),
         endsAt,
       },
@@ -183,34 +185,40 @@ export async function POST(req: Request) {
     const id = Number(body.id);
     const [p] = await db.select().from(promotions).where(eq(promotions.id, id)).limit(1);
     if (!p) return NextResponse.json({ ok: false, error: "Promo no encontrada." }, { status: 404 });
-    const v = validatePromo(body);
+    // Edición con estado combinado: cada campo no enviado toma el valor
+    // guardado, así la guardia valida el resultado EFECTIVO (un update parcial
+    // ni falla con defaults zombis ni borra percent/code/umbrales). También
+    // hace efectivo el guard endsAt < startsAt al editar solo una de las dos.
+    // endsAt: null o "" significa "quitar la fecha de fin"; startsAt vacío
+    // conserva el guardado (no tiene sentido resetearlo a ahora).
+    const merged = {
+      action,
+      id,
+      type: body.type ?? p.type,
+      name: body.name ?? p.name,
+      categoryIds: body.categoryIds ?? p.categoryIds,
+      productIds: body.productIds ?? p.productIds,
+      percent: body.percent ?? p.percent,
+      amountCents: body.amountCents ?? p.amountCents,
+      minQty: body.minQty ?? p.minQty,
+      minSubtotalCents: body.minSubtotalCents ?? p.minSubtotalCents,
+      comboPriceCents: body.comboPriceCents ?? p.comboPriceCents,
+      priority: body.priority ?? p.priority,
+      enabled: body.enabled ?? p.enabled,
+      code: body.code ?? p.code,
+      startsAt: body.startsAt || p.startsAt.toISOString(),
+      endsAt:
+        body.endsAt === null || body.endsAt === ""
+          ? null
+          : body.endsAt ?? p.endsAt?.toISOString() ?? null,
+    };
+    const v = validatePromo(merged);
     if (!v.ok) {
       return NextResponse.json({ ok: false, error: v.error }, { status: 400 });
     }
-    const values = v.values;
-    // Edición completa: campos no enviados conservan el valor previo
-    // (startsAt/endsAt/enabled son opcionales para clientes que solo renombran).
     const [updated] = await db
       .update(promotions)
-      .set({
-        name: values.name,
-        type: values.type,
-        categoryIds: values.categoryIds,
-        productIds: values.productIds,
-        percent: values.percent,
-        amountCents: values.amountCents,
-        minQty: values.minQty,
-        minSubtotalCents: values.minSubtotalCents,
-        comboPriceCents: values.comboPriceCents,
-        priority: values.priority,
-        stackable: false,
-        enabled: body.enabled === undefined ? p.enabled : values.enabled,
-        code: values.code,
-        startsAt: body.startsAt === undefined || body.startsAt === null || body.startsAt === ""
-          ? p.startsAt
-          : values.startsAt!,
-        endsAt: body.endsAt === undefined ? p.endsAt : values.endsAt,
-      })
+      .set(v.values)
       .where(eq(promotions.id, id))
       .returning();
     await recordAudit({

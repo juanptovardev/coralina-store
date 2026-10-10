@@ -5,22 +5,11 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { archiveCompletedShipments } from "@/lib/orders";
 import { canMoveShipment } from "@/lib/domain";
+import { pageParams } from "@/lib/page-params";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 
 const VALID: ShipmentStatus[] = ["revision", "despacho", "reparto", "completado", "archivado"];
-
-/**
- * ?page= (1-based) + ?pageSize= con tope duro: acota el payload sin romper
- * clientes que no envían los parámetros (devuelven la primera página completa).
- */
-function pageParams(sp: URLSearchParams, defaultSize: number) {
-  const p = Number(sp.get("page"));
-  const s = Number(sp.get("pageSize"));
-  const page = Number.isInteger(p) && p >= 1 ? p : 1;
-  const pageSize = Math.min(200, Number.isInteger(s) && s >= 1 ? s : defaultSize);
-  return { page, pageSize, offset: (page - 1) * pageSize };
-}
 
 export async function GET(req: Request) {
   await ensureSeeded();
@@ -29,12 +18,13 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const { page, pageSize, offset } = pageParams(searchParams, 200);
 
+  // Tiebreaker por id: timestamps empatados no repiten/omiten filas entre páginas.
   const rows = await db
     .select({ s: shipments, o: orders, c: customers })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
     .innerJoin(customers, eq(customers.id, orders.customerId))
-    .orderBy(asc(shipments.createdAt));
+    .orderBy(asc(shipments.createdAt), asc(shipments.id));
   const total = rows.length;
   const pageRows = rows.slice(offset, offset + pageSize);
 

@@ -220,7 +220,7 @@ export async function POST(req: Request) {
     }
     // Tallas: nombre obligatorio + stock entero ≥ 0; duplicadas → gana la
     // primera (dedupe también evita el 23505 del índice único productId+size).
-    const sizes = new Map<string, number>();
+    const sizeEntries = new Map<string, number>();
     for (const s of rawSizes) {
       const name = String(s?.size ?? "").trim();
       if (!name) {
@@ -233,7 +233,7 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
-      if (!sizes.has(name)) sizes.set(name, stock);
+      if (!sizeEntries.has(name)) sizeEntries.set(name, stock);
     }
 
     const handle = slugify(title);
@@ -242,32 +242,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Ya existe un producto con ese nombre." }, { status: 409 });
     }
 
-    const [prod] = await db
-      .insert(products)
-      .values({
-        title,
-        handle,
-        description: String(body.description ?? ""),
-        categoryId,
-        status,
-        priceCents: price,
-        compareAtCents,
-        images,
-        tags: (body.tags as string[]) ?? [],
-      })
-      .returning();
-
-    for (const [size, stock] of sizes) {
-      const [v] = await db
-        .insert(variants)
+    // Producto + variantes + inventario en UNA transacción: un fallo a mitad
+    // del loop no deja un producto con tallas a medias.
+    const prod = await db.transaction(async (tx) => {
+      const [p] = await tx
+        .insert(products)
         .values({
-          productId: prod.id,
-          size,
-          sku: `${handle.toUpperCase().replace(/-/g, "")}-${size}`,
+          title,
+          handle,
+          description: String(body.description ?? ""),
+          categoryId,
+          status,
+          priceCents: price,
+          compareAtCents,
+          images,
+          tags: (body.tags as string[]) ?? [],
         })
         .returning();
-      await db.insert(inventoryLevels).values({ variantId: v.id, stocked: stock, threshold: 4 });
-    }
+
+      for (const [size, stock] of sizeEntries) {
+        const [v] = await tx
+          .insert(variants)
+          .values({
+            productId: p.id,
+            size,
+            sku: `${handle.toUpperCase().replace(/-/g, "")}-${size}`,
+          })
+          .returning();
+        await tx.insert(inventoryLevels).values({ variantId: v.id, stocked: stock, threshold: 4 });
+      }
+      return p;
+    });
 
     await recordAudit({
       actor,
@@ -275,7 +280,7 @@ export async function POST(req: Request) {
       entityType: "product",
       entityId: prod.id,
       action: "create",
-      summary: `${actor.name} creó el producto «${title}» (${sizes.size} tallas) en estado ${status}.`,
+      summary: `${actor.name} creó el producto «${title}» (${sizeEntries.size} tallas) en estado ${status}.`,
     });
     return NextResponse.json({ ok: true, id: prod.id, handle });
   }
@@ -334,17 +339,27 @@ export async function POST(req: Request) {
         if (!Number.isFinite(compareAt)) {
           return NextResponse.json({ ok: false, error: "El precio de comparación no es válido." }, { status: 400 });
         }
-        const effectivePrice = (patch.priceCents as number) ?? prod.priceCents;
-        if (compareAt < effectivePrice) {
-          return NextResponse.json(
-            { ok: false, error: "El precio de comparación no puede ser menor al precio actual." },
-            { status: 400 },
-          );
-        }
         patch.compareAtCents = compareAt;
       }
     }
     if (body.title) patch.title = String(body.title);
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ ok: false, error: "No hay campos para actualizar." }, { status: 400 });
+    }
+    // Contrato simétrico con create_product: el ESTADO final (precio y
+    // compareAt combinados con lo guardado) no puede quedar invertido.
+    const effectivePrice = (patch.priceCents as number) ?? prod.priceCents;
+    const effectiveCompareAt =
+      patch.compareAtCents !== undefined ? (patch.compareAtCents as number | null) : prod.compareAtCents;
+    if (effectiveCompareAt != null && effectiveCompareAt < effectivePrice) {
+      return NextResponse.json(
+        { ok: false, error: "El precio de comparación no puede ser menor al precio actual." },
+        { status: 400 },
+      );
+    }
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ ok: false, error: "No hay cambios que aplicar." }, { status: 400 });
+    }
     await db.update(products).set(patch).where(eq(products.id, id));
     await recordAudit({
       actor,
@@ -400,7 +415,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // audit ANTES del borrado físico
+    // Deletes multi-tabla en UNA transacción: un fallo a mitad no deja
+    // variantes huérfanas ni producto sin tallas. El audit se escribe TRAS el
+    // commit (igual que orders/hard_delete): la bitácora no afirma lo que no pasó.
+    await db.transaction(async (tx) => {
+      if (vIds.length > 0) {
+        await tx.delete(inventoryLevels).where(inArray(inventoryLevels.variantId, vIds));
+        await tx.delete(variants).where(inArray(variants.id, vIds));
+      }
+      await tx.delete(products).where(eq(products.id, id));
+    });
     await recordAudit({
       actor,
       module: "productos",
@@ -410,11 +434,6 @@ export async function POST(req: Request) {
       oldValue: { title: prod.title, handle: prod.handle },
       summary: `${actor.name} eliminó definitivamente el producto «${prod.title}».`,
     });
-    if (vIds.length > 0) {
-      await db.delete(inventoryLevels).where(inArray(inventoryLevels.variantId, vIds));
-      await db.delete(variants).where(inArray(variants.id, vIds));
-    }
-    await db.delete(products).where(eq(products.id, id));
     return NextResponse.json({ ok: true, mode: "hard" });
   }
 
