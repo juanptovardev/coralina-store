@@ -28,11 +28,13 @@ const PANTY = { variantId: 241, quantity: 1 };
 const TRAJE = { variantId: 255, quantity: 1 };
 
 // [nombre, items, subtotalCents, discountCents, label esperado]
+// A1: una promo con `code` (Combo Marea → MAREA15) NO se auto-aplica sin el
+// código; sin código el motor cae a la promo sin código (Marea 10 sobre tops).
 const CASES = [
   ["S-T1 1 top", [TOP], 1899000, 189900, "Marea 10 (Tops)"],
-  ["S-T2 top+panty", [TOP, PANTY], 3898000, 584700, "Combo Marea"],
-  ["S-T5 3 items", [TOP, PANTY, TRAJE], 7397000, 584700, "Combo Marea"],
-  ["S-T6 2 tops", [{ ...TOP, quantity: 2 }], 3798000, 569700, "Combo Marea"],
+  ["S-T2 top+panty (sin código)", [TOP, PANTY], 3898000, 189900, "Marea 10 (Tops)"],
+  ["S-T5 3 items (sin código)", [TOP, PANTY, TRAJE], 7397000, 189900, "Marea 10 (Tops)"],
+  ["S-T6 2 tops (sin código)", [{ ...TOP, quantity: 2 }], 3798000, 379800, "Marea 10 (Tops)"],
   ["S-T7 traje solo", [TRAJE], 3499000, 0, null],
 ];
 
@@ -56,9 +58,11 @@ for (const pids of [[], [251, 241]]) {
 }
 
 // Casos con code (contract v4: el code restringe el pool) via /api/cart/evaluate
+// S-T2b: el mismo carrito top+panty CON el código recupera Combo Marea (584700).
 const CODECASES = [
   ["S-T3 1 top + MAREA15", [TOP], "MAREA15", 0],
   ["S-T3b MAREA15 con espacios", [TOP], "  marea15  ", 0],
+  ["S-T2b top+panty + MAREA15", [TOP, PANTY], "MAREA15", 584700],
   ["S-T4 codigo invalido", [TOP], "XYZ123", 0],
 ];
 for (const [name, items, code, disc] of CODECASES) {

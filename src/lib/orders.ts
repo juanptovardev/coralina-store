@@ -26,6 +26,7 @@ export type CreateOrderInput = {
   paymentMethod?: string;
   notes?: string;
   promoCode?: string | null;
+  idempotencyKey?: string | null;
 };
 
 export async function buildCartLines(items: OrderInputItem[]): Promise<CartLine[]> {
@@ -80,6 +81,10 @@ async function decrementStock(variantId: number, qty: number): Promise<boolean> 
   return res.length > 0;
 }
 
+/**
+ * Repone stock. Contrato: solo vale para pedidos que descontaron al crearse
+ * (createOrder); los pedidos del seed se insertan directo en SQL y no descuentan.
+ */
 async function restoreStock(variantId: number, qty: number): Promise<void> {
   await db
     .update(inventoryLevels)
@@ -91,6 +96,20 @@ export async function createOrder(
   input: CreateOrderInput,
   actor: Actor | { name: string; role: "admin" | "asesor" | "system" },
 ): Promise<{ ok: true; orderId: number; displayId: string } | { ok: false; error: string; code?: string }> {
+  // Idempotencia: si el cliente reintenta el MISMO intento de checkout (misma
+  // key), devolvemos el pedido ya creado sin tocar stock ni insertar nada.
+  const idempotencyKey = input.idempotencyKey?.trim() || null;
+  if (idempotencyKey) {
+    const [existing] = await db
+      .select({ id: orders.id, displayId: orders.displayId })
+      .from(orders)
+      .where(eq(orders.idempotencyKey, idempotencyKey))
+      .limit(1);
+    if (existing) {
+      return { ok: true, orderId: existing.id, displayId: existing.displayId };
+    }
+  }
+
   const lines = await buildCartLines(input.items.filter((i) => i.quantity > 0));
   if (lines.length === 0) {
     return { ok: false, code: "invalid_items", error: "El pedido no tiene productos válidos." };
@@ -163,6 +182,7 @@ export async function createOrder(
         paymentMethod: input.paymentMethod ?? "",
         notes: input.notes ?? "",
         tagHistory: [{ tag: "por_revisar", at: now.toISOString(), by: actor.name }],
+        idempotencyKey,
       })
       .returning();
   } catch (e) {

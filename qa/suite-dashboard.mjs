@@ -2,12 +2,12 @@
 // Uso: node qa/suite-dashboard.mjs [baseUrl]   (default http://localhost:3006)
 // Requiere el server :3006 arriba y Postgres (docker coralina-postgres) accesible.
 // NO toca v4/v5. Los fixtures QA se crean con prefijo QA y se limpian al final.
-// Requiere SESSION_UNSIGNED=1 (cookies de rol PLANAS): con cookies firmadas los
-// asserts D0 de rol fallan (el cookie del jar no coincidiria con la firma HMAC).
+// El jar se llena con cookies REALES obtenidas por login (jar.admin/asesor en run()),
+// así la suite funciona con cookies firmadas (prod) y con planas (CORALINA_ALLOW_UNSIGNED=1).
 
 const BASE = process.argv[2] ?? "http://localhost:3006";
 const ADMIN_PASS = process.env.CORALINA_ADMIN_PASSWORD ?? "coralina";
-const jar = { none: "", admin: "coralina_role=admin", asesor: "coralina_role=asesor" };
+const jar = { none: "" };
 
 let pass = 0, fail = 0, warn = 0;
 const failures = [], warnings = [];
@@ -35,6 +35,10 @@ async function req(path, { method = "GET", body, role = "none", cookie } = {}) {
 }
 const g = (p, role = "admin") => req(p, { role });
 const post = (p, body, role = "admin") => req(p, { method: "POST", body, role });
+async function login(role) {
+  const r = await req("/api/admin/session", { method: "POST", body: { role, password: ADMIN_PASS } });
+  return (r.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+}
 // Detector de error boundary: usamos los textos propios (error.tsx / global-error.tsx)
 // en vez de buscar "digest" — el payload RSC de Next incluye `"digest":"$undefined"`
 // en toda página y daría un falso positivo.
@@ -48,6 +52,10 @@ const stamp = Date.now();
 async function run() {
   try {
     console.log(`\n=== QA DASHBOARD v6 \u2014 ${BASE} ===`);
+
+    // Cookies reales vía login (firmadas o planas según el modo del server).
+    jar.admin = await login("admin");
+    jar.asesor = await login("asesor");
 
     // ---------------- D0 · Auth / middleware (P0) ----------------
     section("D0 \u00b7 Auth y middleware (deny-by-default)");
@@ -70,6 +78,14 @@ async function run() {
     ok("POST /api/admin/session rol inv\u00e1lido \u2192 400", badRole.status === 400, http(badRole));
     const adminNoPass = await post("/api/admin/session", { role: "admin" }, "none");
     ok("POST /api/admin/session admin sin clave \u2192 401", adminNoPass.status === 401, http(adminNoPass));
+    const sesDel = await req("/api/admin/session", { method: "DELETE", role: "admin" });
+    ok("DELETE /api/admin/session \u2192 200 { ok:true }", sesDel.status === 200 && sesDel.json?.ok === true, http(sesDel));
+    const delCookies = sesDel.headers.getSetCookie?.() ?? [sesDel.headers.get("set-cookie") ?? ""];
+    ok(
+      "DELETE limpia cookie (coralina_role con Max-Age=0)",
+      delCookies.some((c) => /coralina_role=/.test(c) && /max-age=0/i.test(c)),
+      http(sesDel, JSON.stringify(delCookies)),
+    );
 
     // Fixtures reales resueltos en runtime (no ids hard-codeados).
     const catalog = await g("/api/admin/catalog", "admin");
@@ -141,8 +157,9 @@ async function run() {
         const after = await g("/api/admin/orders", "admin");
         const createdOrder = (after.json?.orders ?? []).find((o) => o.id === manual.json.orderId);
         ok("create_manual fusion\u00f3 2+3 en una l\u00ednea qty=5", createdOrder?.items?.length === 1 && createdOrder?.items?.[0]?.quantity === 5, `items=${createdOrder?.items?.length} qty=${createdOrder?.items?.[0]?.quantity}`);
-        // Higiene: cancelar devuelve el stock (hard_delete NO lo restaura);
-        // solo borrar si el cancel tuvo éxito, para no filtrar inventario.
+        // Higiene: cancelar devuelve el stock; hard_delete solo repone si el
+        // pedido NO está cancelado, así que cancelar ANTES de borrar evita el
+        // doble restore. Solo borrar si el cancel tuvo éxito.
         const cancelQa = await post("/api/admin/orders", { action: "set_tag", orderId: manual.json.orderId, tag: "cancelado" }, "admin");
         if (cancelQa.status !== 200) {
           wa("cleanup create_manual: no se pudo cancelar, orden QA retenida", http(cancelQa));
@@ -153,6 +170,44 @@ async function run() {
       }
     } else {
       wa("create_manual no evaluado: sin variante con stock \u2265 5");
+    }
+    // hard_delete repone stock (A2): pending borrado directo restaura; cancelado no duplica.
+    if (stockVariant) {
+      const stockOf = async () => {
+        const c = await g("/api/admin/catalog", "admin");
+        const v = (c.json?.products ?? []).flatMap((p) => p.variants ?? []).find((x) => x.id === stockVariant.id);
+        return v?.stock;
+      };
+      const beforeHd = await stockOf();
+      const mkHd = await post("/api/admin/orders", {
+        action: "create_manual",
+        customer: { name: "QA DASH HD", email: `qa-dash-hd-${stamp}@example.test`, phone: "0", city: "QA", address: "QA" },
+        items: [{ variantId: stockVariant.id, quantity: 2 }],
+        fulfillmentClass: "no_enviar",
+      }, "admin");
+      if (mkHd.json?.ok && mkHd.json?.orderId) {
+        const delHd = await post("/api/admin/orders", { action: "hard_delete", orderId: mkHd.json.orderId, confirmText: mkHd.json.displayId, password: ADMIN_PASS }, "admin");
+        const afterHd = await stockOf();
+        ok("hard_delete de pedido pending repone stock exacto", delHd.status === 200 && afterHd === beforeHd, `before=${beforeHd} after=${afterHd} ${http(delHd)}`);
+      } else {
+        wa("hard_delete restore no evaluado: create_manual fall\u00f3", http(mkHd));
+      }
+
+      const mkCancelHd = await post("/api/admin/orders", {
+        action: "create_manual",
+        customer: { name: "QA DASH HDC", email: `qa-dash-hdc-${stamp}@example.test`, phone: "0", city: "QA", address: "QA" },
+        items: [{ variantId: stockVariant.id, quantity: 2 }],
+        fulfillmentClass: "no_enviar",
+      }, "admin");
+      if (mkCancelHd.json?.ok && mkCancelHd.json?.orderId) {
+        await post("/api/admin/orders", { action: "set_tag", orderId: mkCancelHd.json.orderId, tag: "cancelado" }, "admin");
+        const afterCancel = await stockOf();
+        const delCancel = await post("/api/admin/orders", { action: "hard_delete", orderId: mkCancelHd.json.orderId, confirmText: mkCancelHd.json.displayId, password: ADMIN_PASS }, "admin");
+        const afterDelCancel = await stockOf();
+        ok("hard_delete de pedido cancelado NO vuelve a reponer stock", delCancel.status === 200 && afterDelCancel === afterCancel, `afterCancel=${afterCancel} afterDelete=${afterDelCancel} ${http(delCancel)}`);
+      } else {
+        wa("hard_delete (cancelado) no evaluado: create_manual fall\u00f3", http(mkCancelHd));
+      }
     }
     // Cap raw: 501 \u00edtems crudos \u2192 400 (se rechaza antes del merge, sin mutar BD).
     const tooMany = await post("/api/admin/orders", {
@@ -308,7 +363,8 @@ async function run() {
     } catch { }
 
     // Red de seguridad: borra órdenes QA creadas por create_manual (email qa-dash-*).
-    // Solo hard_delete si el cancel (única vía que devuelve stock) tuvo éxito.
+    // Solo hard_delete si el cancel tuvo éxito: cancelar ya devolvió el stock y
+    // hard_delete no lo repone de nuevo (status=canceled).
     try {
       const all = await g("/api/admin/orders", "admin");
       const qaOrders = (all.json?.orders ?? []).filter((o) => String(o.customer?.email ?? "").startsWith("qa-dash-"));

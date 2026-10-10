@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { passwordMatches } from "@/lib/admin-auth";
 import { db } from "@/db";
-import { customers, orderItems, orders, shipments, type OperationalTag } from "@/db/schema";
-import { desc, eq, inArray } from "drizzle-orm";
+import { customers, inventoryLevels, orderItems, orders, shipments, type OperationalTag } from "@/db/schema";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { OPERATIONAL_TAGS } from "@/lib/constants";
 import { changeOperationalTag, createOrder } from "@/lib/orders";
@@ -207,6 +207,28 @@ export async function POST(req: Request) {
     if (!passwordMatches(body.password)) {
       return NextResponse.json({ ok: false, error: "Reautenticación fallida." }, { status: 401 });
     }
+    // Operación destructiva multi-tabla: restore de stock + deletes en UNA
+    // transacción. Si algo falla no queda stock repuesto con el pedido vivo
+    // (un reintento no repone de nuevo). El audit se escribe tras el commit.
+    await db.transaction(async (tx) => {
+      // Reponer stock si el pedido NO estaba cancelado: al crearse descontó stock
+      // (un cancelado ya lo repuso una sola vez vía changeOperationalTag).
+      // Contrato: solo pedidos creados vía createOrder; los del seed se insertan
+      // directo en SQL y no descontaron stock (no se debe inflar inventario).
+      if (order.status !== "canceled") {
+        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
+        for (const it of items) {
+          await tx
+            .update(inventoryLevels)
+            .set({ stocked: sql`${inventoryLevels.stocked} + ${it.quantity}`, updatedAt: new Date() })
+            .where(eq(inventoryLevels.variantId, it.variantId));
+        }
+      }
+      await tx.delete(shipments).where(eq(shipments.orderId, id));
+      await tx.delete(orderItems).where(eq(orderItems.orderId, id));
+      await tx.delete(orders).where(eq(orders.id, id));
+    });
+
     await recordAudit({
       actor,
       module: "pedidos",
@@ -216,9 +238,6 @@ export async function POST(req: Request) {
       oldValue: { total: order.totalCents, tag: order.operationalTag },
       summary: `${actor.name} eliminó definitivamente el pedido ${order.displayId} (cascada: items + envío).`,
     });
-    await db.delete(shipments).where(eq(shipments.orderId, id));
-    await db.delete(orderItems).where(eq(orderItems.orderId, id));
-    await db.delete(orders).where(eq(orders.id, id));
     return NextResponse.json({ ok: true });
   }
 

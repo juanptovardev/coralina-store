@@ -5,13 +5,13 @@ import { getActor } from "@/lib/session";
 import { clientIp, rateLimit, RATE_LIMIT_ERROR, RATE_LIMIT_RETRY_AFTER } from "@/lib/rate-limit";
 import { decodeRole, encodeRole } from "@/lib/session-sign";
 export async function GET() {
-  // Sin cookie de rol VÁLIDA devolvemos role:null (getActor() coacciona cualquier
-  // rol inválido a "asesor", así que no sirve para detectar sesión ausente/embebida).
+  // Sin cookie de rol VÁLIDA devolvemos role:null. getActor() es fail-closed
+  // (lanza ForbiddenError), así que no sirve para detectar sesión ausente.
   const raw = (await cookies()).get("coralina_role")?.value;
   const role = await decodeRole(raw);
   // Allowlist del rol (no truthiness): un cookie basura no debe verse como sesión.
-  // Nota: getActor() vuelve a decodificar el cookie a propósito (misma semántica que
-  // el gate middleware; si B6 cambia getActor() a fail-closed, borrar este guard).
+  // Este guard debe quedarse: getActor() lanzaría ForbiddenError (500 sin capturar)
+  // si el rol no es válido, en vez de devolver { role: null }.
   if (role !== "admin" && role !== "asesor") return NextResponse.json({ role: null });
   return NextResponse.json(await getActor());
 }
@@ -45,4 +45,16 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
   return NextResponse.json({ ok: true, role });
+}
+
+export async function DELETE() {
+  const store = await cookies();
+  store.set("coralina_role", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+  return NextResponse.json({ ok: true });
 }

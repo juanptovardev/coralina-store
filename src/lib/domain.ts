@@ -131,8 +131,8 @@ export function evaluatePromos(
 ): PromoResult {
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   let pool = promos.filter((p) => promoActive(p));
-  // Normalizar antes de decidir: un código en blanco ("   ") NO filtra el pool
-  // (espeja promo.ts). Evita divergencia drawer/server en la frontera.
+  // Normalizar antes de decidir: un código en blanco ("   ") se trata como
+  // "sin código" (auto-aplica solo promos sin código; espeja promo.ts).
   const wanted = (code ?? "").trim().toLowerCase();
   if (wanted) {
     pool = pool.filter((p) => (p.code ?? "").trim().toLowerCase() === wanted);
@@ -145,6 +145,9 @@ export function evaluatePromos(
         considered: [],
         note: `Código “${code}” no válido o vencido`,
       };
+  } else {
+    // Sin código: excluir promos con código (no se auto-aplican).
+    pool = pool.filter((p) => (p.code ?? "").trim() === "");
   }
   const considered = pool
     .slice()

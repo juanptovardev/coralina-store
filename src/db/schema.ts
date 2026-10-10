@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -47,7 +48,9 @@ export const products = pgTable("products", {
   title: text("title").notNull(),
   handle: text("handle").notNull().unique(),
   description: text("description").default("").notNull(),
-  categoryId: integer("category_id").notNull(),
+  categoryId: integer("category_id")
+    .notNull()
+    .references(() => categories.id, { onDelete: "restrict" }),
   status: text("status").$type<"draft" | "published" | "archived">().default("draft").notNull(),
   priceCents: integer("price_cents").default(0).notNull(),
   compareAtCents: integer("compare_at_cents"),
@@ -60,17 +63,25 @@ export const variants = pgTable(
   "variants",
   {
     id: serial("id").primaryKey(),
-    productId: integer("product_id").notNull(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
     size: text("size").notNull(),
     sku: text("sku").notNull(),
     active: boolean("active").default(true).notNull(),
   },
-  (t) => ({ uniqueVariant: unique().on(t.productId, t.size) }),
+  (t) => ({
+    uniqueVariant: unique().on(t.productId, t.size),
+    productIdx: index("variants_product_id_idx").on(t.productId),
+  }),
 );
 
 export const inventoryLevels = pgTable("inventory_levels", {
   id: serial("id").primaryKey(),
-  variantId: integer("variant_id").notNull().unique(),
+  variantId: integer("variant_id")
+    .notNull()
+    .unique()
+    .references(() => variants.id, { onDelete: "cascade" }),
   stocked: integer("stocked").default(0).notNull(),
   reserved: integer("reserved").default(0).notNull(),
   threshold: integer("threshold").default(4).notNull(),
@@ -100,10 +111,14 @@ export type OperationalTag =
   | "completado"
   | "cancelado";
 
-export const orders = pgTable("orders", {
-  id: serial("id").primaryKey(),
-  displayId: text("display_id").notNull().unique(),
-  customerId: integer("customer_id").notNull(),
+export const orders = pgTable(
+  "orders",
+  {
+    id: serial("id").primaryKey(),
+    displayId: text("display_id").notNull().unique(),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
   source: text("source").$type<"web" | "manual">().default("web").notNull(),
   status: text("status").$type<"pending" | "completed" | "canceled">().default("pending").notNull(),
   operationalTag: text("operational_tag").$type<OperationalTag>().default("por_revisar").notNull(),
@@ -116,33 +131,54 @@ export const orders = pgTable("orders", {
   paymentMethod: text("payment_method").default("").notNull(),
   notes: text("notes").default("").notNull(),
   tagHistory: jsonb("tag_history").$type<{ tag: string; at: string; by: string }[]>().default([]).notNull(),
+  idempotencyKey: text("idempotency_key").unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+  },
+  (t) => ({
+    createdAtIdx: index("orders_created_at_idx").on(t.createdAt),
+    customerStatusIdx: index("orders_customer_status_idx").on(t.customerId, t.status),
+  }),
+);
 
-export const orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").notNull(),
-  variantId: integer("variant_id").notNull(),
-  productTitle: text("product_title").notNull(),
-  size: text("size").notNull(),
-  sku: text("sku").notNull(),
-  unitPriceCents: integer("unit_price_cents").notNull(),
-  quantity: integer("quantity").notNull(),
-});
+export const orderItems = pgTable(
+  "order_items",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    variantId: integer("variant_id")
+      .notNull()
+      .references(() => variants.id, { onDelete: "restrict" }),
+    productTitle: text("product_title").notNull(),
+    size: text("size").notNull(),
+    sku: text("sku").notNull(),
+    unitPriceCents: integer("unit_price_cents").notNull(),
+    quantity: integer("quantity").notNull(),
+  },
+  (t) => ({ orderIdx: index("order_items_order_id_idx").on(t.orderId) }),
+);
 
 export type ShipmentStatus = "revision" | "despacho" | "reparto" | "completado" | "archivado";
 
-export const shipments = pgTable("shipments", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").notNull().unique(),
-  status: text("status").$type<ShipmentStatus>().default("revision").notNull(),
-  statusHistory: jsonb("status_history").$type<{ status: string; at: string; by: string }[]>().default([]).notNull(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  archivedAt: timestamp("archived_at", { withTimezone: true }),
-  carrier: text("carrier").default("").notNull(),
-  trackingCode: text("tracking_code").default("").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const shipments = pgTable(
+  "shipments",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    status: text("status").$type<ShipmentStatus>().default("revision").notNull(),
+    statusHistory: jsonb("status_history").$type<{ status: string; at: string; by: string }[]>().default([]).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    carrier: text("carrier").default("").notNull(),
+    trackingCode: text("tracking_code").default("").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({ orderIdx: index("shipments_order_id_idx").on(t.orderId) }),
+);
 
 /* ------------------------------------------------------------------ */
 /* Diseño: Home layouts + theme tokens                                 */
@@ -236,20 +272,24 @@ export const promotions = pgTable("promotions", {
 /* Auditoría                                                           */
 /* ------------------------------------------------------------------ */
 
-export const auditLog = pgTable("audit_log", {
-  id: serial("id").primaryKey(),
-  actorName: text("actor_name").notNull(),
-  actorRole: text("actor_role").$type<"admin" | "asesor" | "system">().notNull(),
-  module: text("module").notNull(),
-  entityType: text("entity_type").notNull(),
-  entityId: text("entity_id").default("").notNull(),
-  action: text("action").notNull(),
-  fieldChanged: text("field_changed").default("").notNull(),
-  oldValue: jsonb("old_value"),
-  newValue: jsonb("new_value"),
-  summary: text("summary").default("").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: serial("id").primaryKey(),
+    actorName: text("actor_name").notNull(),
+    actorRole: text("actor_role").$type<"admin" | "asesor" | "system">().notNull(),
+    module: text("module").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").default("").notNull(),
+    action: text("action").notNull(),
+    fieldChanged: text("field_changed").default("").notNull(),
+    oldValue: jsonb("old_value"),
+    newValue: jsonb("new_value"),
+    summary: text("summary").default("").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({ createdAtIdx: index("audit_log_created_at_idx").on(t.createdAt) }),
+);
 
 /** Registro inmutable de purgas: nunca se borra. */
 export const auditPurges = pgTable("audit_purges", {

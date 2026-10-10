@@ -246,14 +246,14 @@ async function run() {
   const eTop = await ev([{ variantId: vTop.id, quantity: 1 }]);
   ok("1 top: descuento Marea 10 = 1899", eTop.discountCents === 189900 && (eTop.applied?.[0]?.label ?? "").includes("Marea 10"), `${eTop.discountCents} ${eTop.applied?.[0]?.label}`);
   const eCombo = await ev([{ variantId: vTop.id, quantity: 1 }, { variantId: vPanty.id, quantity: 1 }]);
-  ok("top+panty: Combo = 5847", eCombo.discountCents === 584700, `${eCombo.discountCents}`);
+  ok("top+panty sin código: Combo NO auto-aplica (cae a Marea 10 = 1899)", eCombo.discountCents === 189900 && (eCombo.applied?.[0]?.label ?? "").includes("Marea 10"), `${eCombo.discountCents} ${eCombo.applied?.[0]?.label}`);
   const e3 = await ev([{ variantId: vTop.id, quantity: 1 }, { variantId: vPanty.id, quantity: 1 }, { variantId: vTraje.id, quantity: 1 }]);
-  ok("top+panty+traje: descuento solo de combo = 5847 (≠ −15% de todo)", e3.discountCents === 584700, `${e3.discountCents}`);
-  ok("total con ítem fuera de categoría = 6812300", e3.totalCents === 6812300, `${e3.totalCents}`);
+  ok("top+panty+traje sin código: descuento solo de tops = 1899 (≠ −15% de todo)", e3.discountCents === 189900, `${e3.discountCents}`);
+  ok("total con ítem fuera de categoría = 7207100", e3.totalCents === 7207100, `${e3.totalCents}`);
   const eTraje = await ev([{ variantId: vTraje.id, quantity: 1 }]);
   ok("traje solo: sin promo = 0", eTraje.discountCents === 0, `${eTraje.discountCents}`);
   const e2tops = await ev([{ variantId: vTop.id, quantity: 2 }]);
-  ok("2 tops: combo OR aplica −15% (drawer==server, ver parity-drawer D-T6)", e2tops.discountCents === 569700 && e2tops.totalCents === 3228300, `desc=${e2tops.discountCents} total=${e2tops.totalCents}`);
+  ok("2 tops sin código: Marea 10 sobre tops = 3798 (drawer==server)", e2tops.discountCents === 379800 && e2tops.totalCents === 3418200, `desc=${e2tops.discountCents} total=${e2tops.totalCents}`);
 
   const chTop = await postPub("/api/store", { ...cust("CodeTop"), items: [{ variantId: vTop.id, qty: 1 }], promoCode: "MAREA15" });
   ok("1 top + MAREA15 → cobra full (0 desc), promo null", chTop.json?.total === 18990 && chTop.json?.discount === 0 && !chTop.json?.promo, `total=${chTop.json?.total} disc=${chTop.json?.discount} promo=${chTop.json?.promo}`);
@@ -262,7 +262,7 @@ async function run() {
   const chSp = await postPub("/api/store", { ...cust("CodeSp"), items: [{ variantId: vTop.id, qty: 1 }], promoCode: "  marea15  " });
   ok("código con espacios ' marea15 ' → 0 (trim simétrico)", chSp.json?.discount === 0, `disc=${chSp.json?.discount}`);
   const chBlank = await postPub("/api/store", { ...cust("CodeBlank"), items: [{ variantId: vTop.id, qty: 1 }], promoCode: "   " });
-  ok("código en blanco '   ' → no filtra el pool (aplica Marea 10, drawer==server)", chBlank.json?.discount === 1899, `disc=${chBlank.json?.discount}`);
+  ok("código en blanco '   ' → se trata como sin código (aplica Marea 10, drawer==server)", chBlank.json?.discount === 1899, `disc=${chBlank.json?.discount}`);
   const chCombo = await postPub("/api/store", { ...cust("CodeCombo"), items: [{ variantId: vTop.id, qty: 1 }, { variantId: vPanty.id, qty: 1 }], promoCode: "MAREA15" });
   ok("top+panty + MAREA15 → Combo 5847", chCombo.json?.discount === 5847, `disc=${chCombo.json?.discount}`);
 

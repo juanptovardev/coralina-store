@@ -56,6 +56,15 @@ for (const [name, lines] of NOCODE) {
   );
 }
 
+// A1: sin código, una promo con `code` (Combo Marea → MAREA15) NO se auto-aplica.
+// El drawer cae a la promo sin código (Marea 10 sobre tops) — igual que el server.
+const dCombo = evaluatePromos([TOP, PANTY], promos, null);
+ok(
+  "D-T2b top+panty sin código: no auto-aplica Combo Marea (usa Marea 10)",
+  dCombo.applied?.name === "Marea 10 (Tops)" && Math.round(dCombo.discount * 100) === 189900,
+  `applied=${dCombo.applied?.name} disc=${dCombo.discount}`,
+);
+
 // Casos con código (contract v4: el código restringe el pool)
 // Code válido pero promo no elegible → v4 verbatim: note null, reason vive en `considered`.
 const d3 = evaluatePromos([TOP], promos, "MAREA15");

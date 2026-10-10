@@ -35,10 +35,11 @@ function eligible(
  * Motor único de evaluación: se usa igual en el carrito del storefront,
  * en el preview del dashboard y al crear pedidos manuales.
  *
- * Contrato de códigos (espeja domain.ts:134 del storefront v4):
+ * Contrato de códigos (espeja evaluatePromos de domain.ts):
  * - `code` presente → el pool se reduce a las promos que declaran ese código.
- * - Sin código → NO se excluyen las promos con código (el drawer v4 las aplica
- *   automáticamente; excluirlas crearía divergencia drawer/server).
+ * - Sin código → la auto-aplicación solo considera promos SIN código; una promo
+ *   con `code` exige escribirlo (no se auto-aplica). Mantiene la paridad
+ *   drawer/server porque domain.ts aplica la misma regla.
  * - NO apila (PRD 12.2): la primera promo aplicable por prioridad es la
  *   única que se aplica (espeja evaluatePromos de domain.ts).
  */
@@ -58,9 +59,13 @@ export async function evaluateCart(lines: CartLine[], code?: string | null): Pro
   let active = all.filter(
     (p) => p.enabled && p.startsAt <= now && (!p.endsAt || p.endsAt >= now),
   );
-  if (code) {
-    const wanted = code.trim().toLowerCase();
-    if (wanted) active = active.filter((p) => (p.code ?? "").trim().toLowerCase() === wanted);
+  const wanted = (code ?? "").trim().toLowerCase();
+  if (wanted) {
+    // Con código: el pool se reduce a la promo que declara ese código.
+    active = active.filter((p) => (p.code ?? "").trim().toLowerCase() === wanted);
+  } else {
+    // Sin código: la auto-aplicación solo considera promos sin código.
+    active = active.filter((p) => (p.code ?? "").trim() === "");
   }
 
   const applied: AppliedPromo[] = [];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { fmtCLP } from "@/lib/utils";
 import { useStore } from "./shop";
@@ -14,6 +14,9 @@ export function Checkout() {
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ code: string; total: number } | null>(null);
+  // Clave estable por intento de checkout: los reintentos de la MISMA compra
+  // reutilizan la key (el server es idempotente). Se renueva tras un éxito.
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -21,6 +24,7 @@ export function Checkout() {
   const placeOrder = async () => {
     setPlacing(true);
     setError(null);
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID();
     try {
       const res = await fetch("/api/store", {
         method: "POST",
@@ -31,11 +35,13 @@ export function Checkout() {
           promoCode: promoCode || null,
           payment: { method: payMethod, ref: payRef || "sin referencia" },
           notes: form.notes || null,
+          idempotencyKey: idempotencyKeyRef.current,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "No pudimos procesar tu pedido");
       clear();
+      idempotencyKeyRef.current = null;
       setDone({ code: data.code, total: data.total });
       window.scrollTo({ top: 0 });
     } catch (e) {

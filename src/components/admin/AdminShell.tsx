@@ -40,13 +40,25 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
         : undefined;
     if (role === "admin" && password === null) return;
     setSwitching(true);
-    await fetch("/api/admin/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role, password }),
-    });
-    router.refresh();
-    setTimeout(() => setSwitching(false), 600);
+    try {
+      await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role, password }),
+      });
+      router.refresh();
+    } finally {
+      setTimeout(() => setSwitching(false), 600);
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch("/api/admin/session", { method: "DELETE" });
+    } catch {
+      /* best-effort: igual navegamos a /login */
+    }
+    window.location.assign("/login");
   }
 
   const current = NAV.find((n) => (n.href === "/admin" ? pathname === "/admin" : pathname.startsWith(n.href)));
@@ -142,6 +154,12 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
               </button>
             ))}
           </div>
+          <button
+            onClick={logout}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 transition hover:border-[var(--d-gold)] hover:text-white"
+          >
+            Salir
+          </button>
           <Link
             href="/"
             className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 hover:border-[var(--d-gold)] hover:text-white"

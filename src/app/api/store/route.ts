@@ -20,6 +20,7 @@ type Body = {
   promoCode?: string | null;
   payment?: { method?: string; ref?: string } | null;
   notes?: string | null;
+  idempotencyKey?: string | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -83,6 +84,10 @@ export async function POST(req: NextRequest) {
         paymentMethod: body.payment?.method || undefined,
         notes: body.notes || body.customer?.notes || undefined,
         promoCode: typeof body.promoCode === "string" && body.promoCode.trim() ? body.promoCode.trim() : null,
+        idempotencyKey:
+          typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
+            ? body.idempotencyKey.trim()
+            : null,
       },
       { name: "Storefront", role: "system" },
     );

@@ -20,7 +20,10 @@ export async function getActor(): Promise<Actor> {
   const raw = store.get("coralina_role")?.value;
   // Prod: la cookie va firmada (HMAC). Dev/QA: se acepta el valor plano.
   const decoded = await decodeRole(raw);
-  const role: Role = decoded === "admin" ? "admin" : "asesor";
+  if (decoded !== "admin" && decoded !== "asesor") {
+    throw new ForbiddenError("Sesión inválida o ausente.");
+  }
+  const role: Role = decoded;
   return {
     role,
     name: NAMES[role],
