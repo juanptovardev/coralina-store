@@ -188,7 +188,7 @@ async function run() {
       if (mkHd.json?.ok && mkHd.json?.orderId) {
         const delHd = await post("/api/admin/orders", { action: "hard_delete", orderId: mkHd.json.orderId, confirmText: mkHd.json.displayId, password: ADMIN_PASS }, "admin");
         const afterHd = await stockOf();
-        ok("hard_delete de pedido pending repone stock exacto", delHd.status === 200 && afterHd === beforeHd, `before=${beforeHd} after=${afterHd} ${http(delHd)}`);
+        ok("hard_delete de pedido pending repone stock exacto", delHd.status === 200 && typeof beforeHd === "number" && afterHd === beforeHd, `before=${beforeHd} after=${afterHd} ${http(delHd)}`);
       } else {
         wa("hard_delete restore no evaluado: create_manual fall\u00f3", http(mkHd));
       }
@@ -200,11 +200,16 @@ async function run() {
         fulfillmentClass: "no_enviar",
       }, "admin");
       if (mkCancelHd.json?.ok && mkCancelHd.json?.orderId) {
-        await post("/api/admin/orders", { action: "set_tag", orderId: mkCancelHd.json.orderId, tag: "cancelado" }, "admin");
-        const afterCancel = await stockOf();
-        const delCancel = await post("/api/admin/orders", { action: "hard_delete", orderId: mkCancelHd.json.orderId, confirmText: mkCancelHd.json.displayId, password: ADMIN_PASS }, "admin");
-        const afterDelCancel = await stockOf();
-        ok("hard_delete de pedido cancelado NO vuelve a reponer stock", delCancel.status === 200 && afterDelCancel === afterCancel, `afterCancel=${afterCancel} afterDelete=${afterDelCancel} ${http(delCancel)}`);
+        const cancelHd = await post("/api/admin/orders", { action: "set_tag", orderId: mkCancelHd.json.orderId, tag: "cancelado" }, "admin");
+        ok("set_tag pending \u2192 cancelado \u2192 200 (setup hard_delete cancelado)", cancelHd.status === 200, http(cancelHd));
+        if (cancelHd.status !== 200) {
+          wa("hard_delete (cancelado) no evaluado: cancel fall\u00f3", http(cancelHd));
+        } else {
+          const afterCancel = await stockOf();
+          const delCancel = await post("/api/admin/orders", { action: "hard_delete", orderId: mkCancelHd.json.orderId, confirmText: mkCancelHd.json.displayId, password: ADMIN_PASS }, "admin");
+          const afterDelCancel = await stockOf();
+          ok("hard_delete de pedido cancelado NO vuelve a reponer stock", delCancel.status === 200 && typeof afterCancel === "number" && afterDelCancel === afterCancel, `afterCancel=${afterCancel} afterDelete=${afterDelCancel} ${http(delCancel)}`);
+        }
       } else {
         wa("hard_delete (cancelado) no evaluado: create_manual fall\u00f3", http(mkCancelHd));
       }
