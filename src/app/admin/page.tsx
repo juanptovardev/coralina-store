@@ -1,7 +1,7 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { db } from "@/db";
 import { orders, shipments } from "@/db/schema";
-import { desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { categoryStockSummary, getActiveLayout, listProducts } from "@/lib/queries";
 import { buildByDay14 } from "@/lib/metrics";
 import { formatCOP, LAYOUT_PLANE, OPERATIONAL_TAGS, type LayoutMode } from "@/lib/constants";
@@ -10,19 +10,19 @@ import { readBanner } from "@/lib/design";
 export const dynamic = "force-dynamic";
 
 export default async function AdminHome() {
-  const [layout, products, stock, allOrders, dayRows, [kpi]] = await Promise.all([
+  const [layout, products, stock, allOrders, dayRows, [kpi], board] = await Promise.all([
     getActiveLayout(),
     listProducts(),
     categoryStockSummary(),
     db.select().from(orders).orderBy(desc(orders.createdAt)).limit(300),
-    // dayRows: lectura ligera sobre TODA la tabla (sin limit) â€” fuente de las
-    // barras de 14 dÃ­as, byTag y "Por revisar" (paridad con /api/admin/orders).
+    // dayRows: lectura ligera sobre TODA la tabla (sin limit) — fuente de las
+    // barras de 14 días, byTag y "Por revisar" (paridad con /api/admin/orders).
     db
       .select({ createdAt: orders.createdAt, totalCents: orders.totalCents, operationalTag: orders.operationalTag })
       .from(orders)
-      .where(ne(orders.status, "canceled")),
+      .where(and(ne(orders.status, "canceled"), sql`${orders.createdAt} >= now() - interval '14 days'`)),
     // KPIs como agregados SQL sobre TODA la tabla (mismas reglas que
-    // /api/admin/orders: no cancelados, ventana mÃ³vil de 30 dÃ­as).
+    // /api/admin/orders: no cancelados, ventana móvil de 30 días).
     db
       .select({
         today: sql<number>`count(*) filter (where ${orders.status} <> 'canceled' and ${orders.createdAt} >= now() - interval '24 hours')::int`,
@@ -32,8 +32,8 @@ export default async function AdminHome() {
         avgTicket: sql<number>`coalesce(round(avg(${orders.totalCents}) filter (where ${orders.status} <> 'canceled')), 0)::float8`,
       })
       .from(orders),
+    db.select().from(shipments),
   ]);
-  const board = await db.select().from(shipments);
 
   // server component async: corre una vez por request; "hoy" compartido por hourAgo y las barras
   const now = Date.now();
@@ -49,7 +49,7 @@ export default async function AdminHome() {
   const maxTag = Math.max(1, ...Object.values(byTag));
   const recent = allOrders.slice(0, 6);
 
-  /* Necesita atenciÃ³n (estilo v4) */
+  /* Necesita atención (estilo v4) */
   const porRevisar = dayRows.filter((o) => o.operationalTag === "por_revisar").length;
   const staleShipments = board.filter(
     (s) => s.status === "revision" && new Date(s.createdAt) < hourAgo(24),
@@ -59,7 +59,7 @@ export default async function AdminHome() {
     .filter((x): x is string => Boolean(x))
     .slice(0, 3);
 
-  /* Barras de los Ãºltimos 14 dÃ­as naturales (fuente Ãºnica: lib/metrics) */
+  /* Barras de los últimos 14 días naturales (fuente única: lib/metrics) */
   const byDay = buildByDay14(dayRows, now);
   const maxDay = Math.max(1, ...byDay.map((d) => d.count));
 
@@ -74,19 +74,19 @@ export default async function AdminHome() {
         </svg>
         <div className="relative">
           <p className="text-[0.6rem] font-bold tracking-[0.24em] text-[var(--d-gold)] uppercase">
-            Consola de operaciÃ³n
+            Consola de operación
           </p>
-          <h1 className="d-title mt-1.5 text-3xl text-white">Buen dÃ­a, Coralina</h1>
+          <h1 className="d-title mt-1.5 text-3xl text-white">Buen día, Coralina</h1>
           <p className="mt-2 max-w-2xl text-[0.85rem] leading-relaxed text-white/65">
             Mover el banner, crear tallas, armar un combo o cambiar el home se hace con clics. El sistema
-            mantiene los invariantes: stock, estados, envÃ­os, layout activo y bitÃ¡cora.
+            mantiene los invariantes: stock, estados, envíos, layout activo y bitácora.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href="/admin/pedidos" className="dash-btn dash-btn-primary">
               Ver pedidos
             </Link>
             <Link href="/admin/envios" className="dash-btn border-white/25 bg-white/10 text-white hover:!text-white">
-              Tablero de envÃ­os
+              Tablero de envíos
             </Link>
           </div>
         </div>
@@ -97,7 +97,7 @@ export default async function AdminHome() {
         <KPI
           label="Pedidos hoy"
           value={String(kpi.today)}
-          hint={`${kpi.prevDay} el dÃ­a anterior`}
+          hint={`${kpi.prevDay} el día anterior`}
           trend={kpi.today >= kpi.prevDay ? "up" : "down"}
         />
         <KPI label="Pedidos del mes" value={String(kpi.month)} hint={`${formatCOP(kpi.revenueMonth)} facturados`} />
@@ -105,15 +105,15 @@ export default async function AdminHome() {
         <KPI
           label="Variantes bajo umbral"
           value={String(lowStock)}
-          hint={lowStock ? "Requiere reposiciÃ³n" : "Inventario saludable"}
+          hint={lowStock ? "Requiere reposición" : "Inventario saludable"}
           trend={lowStock > 0 ? "down" : "up"}
         />
       </div>
 
-      {/* ---------- necesita atenciÃ³n (v4) ---------- */}
+      {/* ---------- necesita atención (v4) ---------- */}
       <div className="dash-panel p-5">
         <div className="flex items-center justify-between">
-          <p className="dash-label">Necesita atenciÃ³n</p>
+          <p className="dash-label">Necesita atención</p>
           <span className="text-[0.68rem] text-[var(--d-ink-soft)]">clic para abrir</span>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
@@ -124,17 +124,17 @@ export default async function AdminHome() {
             <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">Por revisar</p>
             <p className="d-title mt-1 text-3xl text-[var(--d-accent)]">{porRevisar}</p>
             <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">
-              pedidos sin confirmar â†’ lista filtrada
+              pedidos sin confirmar → lista filtrada
             </p>
           </Link>
           <Link
             href="/admin/envios"
             className="group rounded-lg border border-[var(--d-line)] bg-[var(--d-panel-2)] p-4 transition hover:border-[var(--d-accent)]"
           >
-            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">En RevisiÃ³n +24h</p>
+            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">En Revisión +24h</p>
             <p className="d-title mt-1 text-3xl text-[var(--d-warn)]">{staleShipments.length}</p>
             <p className="mono mt-1 truncate text-[0.68rem] text-[var(--d-ink-soft)]">
-              {staleCodes.length ? staleCodes.join(" Â· ") : "ninguno atrasado"}
+              {staleCodes.length ? staleCodes.join(" · ") : "ninguno atrasado"}
             </p>
           </Link>
           <Link
@@ -145,7 +145,7 @@ export default async function AdminHome() {
             <p className="d-title mt-1 text-3xl" style={{ color: "#2f6b5e" }}>
               {lowStock}
             </p>
-            <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">variantes bajo umbral â†’ inventario</p>
+            <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">variantes bajo umbral → inventario</p>
           </Link>
         </div>
       </div>
@@ -153,7 +153,7 @@ export default async function AdminHome() {
       <div className="grid gap-5 xl:grid-cols-3">
         {/* ---------- capas de estado ---------- */}
         <div className="dash-panel p-5 xl:col-span-2">
-          <p className="dash-label">Tres capas de estado Â· nunca se mezclan</p>
+          <p className="dash-label">Tres capas de estado · nunca se mezclan</p>
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <StateCard
               title="Estado comercial"
@@ -171,16 +171,16 @@ export default async function AdminHome() {
             />
             <StateCard
               title="Estado del paquete"
-              subtitle="Kanban de envÃ­os"
+              subtitle="Kanban de envíos"
               owner="Arrastrar y soltar"
-              items={["RevisiÃ³n", "Despacho", "Reparto", "Completado"]}
+              items={["Revisión", "Despacho", "Reparto", "Completado"]}
               accent="#2f6b5e"
             />
           </div>
           <p className="mt-4 rounded-lg bg-[var(--d-panel-2)] p-3 text-[0.76rem] leading-relaxed text-[var(--d-ink-soft)]">
             Un pedido web nace con clase <strong className="text-[var(--d-ink)]">enviar</strong>, tag{" "}
             <strong className="text-[var(--d-ink)]">por revisar</strong> y su tarjeta en{" "}
-            <strong className="text-[var(--d-ink)]">RevisiÃ³n</strong>. Uno manual marcado{" "}
+            <strong className="text-[var(--d-ink)]">Revisión</strong>. Uno manual marcado{" "}
             <strong className="text-[var(--d-ink)]">no enviar</strong> nunca aparece en el tablero.
           </p>
         </div>
@@ -191,7 +191,7 @@ export default async function AdminHome() {
             <p className="dash-label">Home publicado</p>
             <p className="mt-1 text-sm font-semibold">{layout.name}</p>
             <p className="text-[0.7rem] text-[var(--d-ink-soft)]">
-              Layout {plane.label} Â· versiÃ³n {layout.version}
+              Layout {plane.label} · versión {layout.version}
             </p>
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -201,19 +201,19 @@ export default async function AdminHome() {
             className="h-32 w-full object-cover"
           />
           <div className="space-y-2 p-4">
-            <MiniRow label="ProporciÃ³n" value={`${readBanner(layout.banner).aspect.toFixed(2)}:1`} />
+            <MiniRow label="Proporción" value={`${readBanner(layout.banner).aspect.toFixed(2)}:1`} />
             <MiniRow label="Overlay" value={`${Math.round(readBanner(layout.banner).overlay * 100)}%`} />
-            <MiniRow label="Widgets activos" value={Array.isArray(layout.widgets) ? String(layout.widgets.filter((w) => w.enabled).length) : "â€”"} />
+            <MiniRow label="Widgets activos" value={Array.isArray(layout.widgets) ? String(layout.widgets.filter((w) => w.enabled).length) : "—"} />
           </div>
         </div>
       </div>
 
-      {/* ---------- barras 14 dÃ­as (v4) ---------- */}
+      {/* ---------- barras 14 días (v4) ---------- */}
       <div className="dash-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="dash-label">Pedidos Â· Ãºltimos 14 dÃ­as</p>
+          <p className="dash-label">Pedidos · últimos 14 días</p>
           <p className="text-[0.7rem] text-[var(--d-ink-soft)]">
-            total {byDay.reduce((a, d) => a + d.count, 0)} Â·{" "}
+            total {byDay.reduce((a, d) => a + d.count, 0)} ·{" "}
             {formatCOP(byDay.reduce((a, d) => a + d.revenueCents, 0))}
           </p>
         </div>
@@ -226,7 +226,7 @@ export default async function AdminHome() {
               <div
                 className="w-full rounded-t bg-[var(--d-accent)]/80 transition group-hover:bg-[var(--d-accent)]"
                 style={{ height: `${Math.max(3, (d.count / maxDay) * 130)}px` }}
-                title={`${d.date}: ${d.count} pedido(s) Â· ${formatCOP(d.revenueCents)}`}
+                title={`${d.date}: ${d.count} pedido(s) · ${formatCOP(d.revenueCents)}`}
               />
               <span className="text-[0.58rem] text-[var(--d-ink-soft)]">
                 {d.date.slice(8)}/{d.date.slice(5, 7)}
@@ -237,7 +237,7 @@ export default async function AdminHome() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-3">
-        {/* ---------- distribuciÃ³n por tag ---------- */}
+        {/* ---------- distribución por tag ---------- */}
         <div className="dash-panel p-5">
           <p className="dash-label">Carga por estado del equipo</p>
           <div className="mt-4 space-y-2.5">
@@ -259,12 +259,12 @@ export default async function AdminHome() {
           </div>
         </div>
 
-        {/* ---------- Ãºltimos pedidos ---------- */}
+        {/* ---------- últimos pedidos ---------- */}
         <div className="dash-panel overflow-hidden xl:col-span-2">
           <div className="flex items-center justify-between border-b border-[var(--d-line)] px-4 py-2.5">
-            <p className="dash-label">Ãšltimos pedidos</p>
+            <p className="dash-label">Últimos pedidos</p>
             <Link href="/admin/pedidos" className="text-[0.72rem] font-semibold text-[var(--d-accent)]">
-              Ver todos â†’
+              Ver todos →
             </Link>
           </div>
           <div className="overflow-x-auto scroll-thin">
@@ -298,18 +298,18 @@ export default async function AdminHome() {
       <div className="grid gap-4 md:grid-cols-3">
         <QuickCard
           href="/admin/envios"
-          title={`${inRevision} en RevisiÃ³n Â· ${activeBoard} en el tablero`}
+          title={`${inRevision} en Revisión · ${activeBoard} en el tablero`}
           text="Arrastra las tarjetas entre columnas. El job de 24h archiva los completados."
         />
         <QuickCard
           href="/admin/productos"
-          title={`${products.length} productos Â· ${products.filter((p) => p.status === "published").length} publicados`}
-          text="Crear uno genera variantes, SKU e inventario automÃ¡ticamente."
+          title={`${products.length} productos · ${products.filter((p) => p.status === "published").length} publicados`}
+          text="Crear uno genera variantes, SKU e inventario automáticamente."
         />
         <QuickCard
           href="/admin/auditoria"
-          title="BitÃ¡cora al dÃ­a"
-          text="Cada mutaciÃ³n queda registrada en lenguaje claro, con filtros y export CSV."
+          title="Bitácora al día"
+          text="Cada mutación queda registrada en lenguaje claro, con filtros y export CSV."
         />
       </div>
     </div>
@@ -370,11 +370,11 @@ function StateCard({
       <span className="block h-1 w-8 rounded-full" style={{ background: accent }} />
       <p className="mt-2 text-[0.78rem] font-semibold">{title}</p>
       <p className="text-[0.66rem] text-[var(--d-ink-soft)]">
-        {subtitle} Â· lo mueve: {owner}
+        {subtitle} · lo mueve: {owner}
       </p>
       <ul className="mono mt-2 space-y-0.5 text-[0.68rem] text-[var(--d-ink-soft)]">
         {items.map((i) => (
-          <li key={i}>â€º {i}</li>
+          <li key={i}>› {i}</li>
         ))}
       </ul>
     </div>
@@ -388,7 +388,7 @@ function QuickCard({ href, title, text }: { href: string; title: string; text: s
       className="dash-panel group flex items-start gap-3 p-4 transition hover:border-[var(--d-accent)]"
     >
       <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--d-accent-soft)] text-[var(--d-accent)]">
-        â†’
+        →
       </span>
       <span>
         <span className="block text-[0.82rem] font-semibold">{title}</span>

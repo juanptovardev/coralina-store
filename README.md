@@ -1,8 +1,8 @@
 # Coralina Store
 
-Tienda e-commerce (Next.js 16 · App Router) con **storefront** y **panel de administración** (pedidos, envíos, catálogo, inventario, clientes, promociones, auditoría).
+Tienda e-commerce (Next.js 15 · App Router) con **storefront** y **panel de administración** (pedidos, envíos, catálogo, inventario, clientes, promociones, auditoría).
 
-- **Stack:** Next 16.2.6 · React 19 · TypeScript · Tailwind 4 · Drizzle ORM + `pg` (PostgreSQL).
+- **Stack:** Next 15.5.27 · React 19 · TypeScript · Tailwind 4 · Drizzle ORM + `pg` (PostgreSQL).
 - **Storefront:** `/`, `/coleccion`, `/producto/[slug]`, `/checkout`.
 - **Admin:** `/admin` (protegido). Login selector de rol + clave de admin.
 
@@ -56,7 +56,7 @@ Scripts: `npm run build` · `npm run start` · `npm run typecheck` · `npm run l
 
 ### ⚠️ Nota sobre Next 16
 
-Algunos builders de Vercel han fallado con Next **16.2.6** al generar el segmento RSC de la página global-error (`ENOENT … _global-error.segments/__PAGE__.segment.rsc.func`). Si el build remoto falla por esto, la vía más segura es fijar una versión de Next ya soportada por Vercel (p. ej. `next@15.5.x`) — lo que además requiere volver de `src/proxy.ts` a `src/middleware.ts`.
+Algunos builders de Vercel han fallado con Next **16.2.6** (el proyecto quedó fijado en **15.5.27** + `src/middleware.ts`) al generar el segmento RSC de la página global-error (`ENOENT … _global-error.segments/__PAGE__.segment.rsc.func`). Si el build remoto falla por esto, la vía más segura es fijar una versión de Next ya soportada por Vercel (p. ej. `next@15.5.x`) — lo que además requiere volver de `src/proxy.ts` a `src/middleware.ts`.
 
 ## Seguridad
 
