@@ -5,6 +5,9 @@ import { LogoMark, WaveIcon, SeagullIcon, CoralIcon, StarfishIcon } from "@/comp
 
 type Role = "admin" | "asesor";
 
+// La clave demo solo se muestra/usa fuera de producción (evita embeberla en el bundle).
+const showDemo = process.env.NODE_ENV !== "production";
+
 export default function LoginPage() {
   const [role, setRole] = useState<Role>("admin");
   const [pw, setPw] = useState("");
@@ -12,8 +15,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState(false);
 
-  const login = async (e?: React.FormEvent, r: Role = role, p = pw) => {
-    e?.preventDefault();
+  const doLogin = async (r: Role, p: string) => {
     setBusy(true);
     setErr(null);
     try {
@@ -74,20 +76,32 @@ export default function LoginPage() {
 
       {/* Formulario */}
       <div className="flex flex-1 items-center justify-center p-6">
-        <form onSubmit={login} className="w-full max-w-sm">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void doLogin(role, pw);
+          }}
+          className="w-full max-w-sm"
+        >
           <h2 className="font-display text-3xl italic">Ingresar</h2>
           <p className="mt-1 text-sm text-ink/55">Usa tu cuenta de equipo.</p>
           <div className="mt-6 space-y-4">
             <div>
-              <label className="label">Rol</label>
-              <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <label className="label" htmlFor="login-role">Rol</label>
+              <select
+                id="login-role"
+                className="input"
+                value={role}
+                onChange={(e) => setRole(e.target.value as Role)}
+              >
                 <option value="admin">Administrador</option>
                 <option value="asesor">Asesor</option>
               </select>
             </div>
             <div>
-              <label className="label">Contraseña</label>
+              <label className="label" htmlFor="login-pw">Contraseña</label>
               <input
+                id="login-pw"
                 className="input"
                 type="password"
                 value={pw}
@@ -113,34 +127,36 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="mt-8 rounded-xl border border-ink/10 bg-white/60 p-4">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink/45">Accesos de demostración</p>
-            <div className="mt-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => login(undefined, "admin", "coralina")}
-                className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
-              >
-                <span>
-                  <strong>Admin</strong> · control total
-                </span>
-                <span className="text-terracotta">usar →</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => login(undefined, "asesor", "coralina")}
-                className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
-              >
-                <span>
-                  <strong>Asesor</strong> · sin borrados duros
-                </span>
-                <span className="text-terracotta">usar →</span>
-              </button>
+          {showDemo && (
+            <div className="mt-8 rounded-xl border border-ink/10 bg-white/60 p-4">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink/45">Accesos de demostración</p>
+              <div className="mt-2 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => void doLogin("admin", "coralina")}
+                  className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
+                >
+                  <span>
+                    <strong>Admin</strong> · control total
+                  </span>
+                  <span className="text-terracotta">usar →</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void doLogin("asesor", "coralina")}
+                  className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
+                >
+                  <span>
+                    <strong>Asesor</strong> · sin borrados duros
+                  </span>
+                  <span className="text-terracotta">usar →</span>
+                </button>
+              </div>
+              <p className="mt-2 text-[0.65rem] text-ink/40">
+                Clave por defecto: <code>coralina</code>. El Asesor no puede hard-delete ni purgar auditoría.
+              </p>
             </div>
-            <p className="mt-2 text-[0.65rem] text-ink/40">
-              Clave por defecto: <code>coralina</code>. El Asesor no puede hard-delete ni purgar auditoría.
-            </p>
-          </div>
+          )}
         </form>
       </div>
     </div>

@@ -3,10 +3,13 @@ import { cookies } from "next/headers";
 import { passwordMatches } from "@/lib/admin-auth";
 import { getActor } from "@/lib/session";
 import { clientIp, rateLimit, RATE_LIMIT_ERROR, RATE_LIMIT_RETRY_AFTER } from "@/lib/rate-limit";
-import { encodeRole } from "@/lib/session-sign";
+import { decodeRole, encodeRole } from "@/lib/session-sign";
 export async function GET() {
-  const actor = await getActor();
-  return NextResponse.json(actor);
+  // Sin cookie válida devolvemos role:null (getActor() coacciona a "asesor",
+  // así que no sirve para detectar sesión ausente/embebida).
+  const raw = (await cookies()).get("coralina_role")?.value;
+  if (!(await decodeRole(raw))) return NextResponse.json({ role: null });
+  return NextResponse.json(await getActor());
 }
 
 export async function POST(req: Request) {

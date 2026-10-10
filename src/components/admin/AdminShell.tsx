@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -7,20 +7,20 @@ import { CoralinaMark } from "@/components/sea";
 import type { Actor } from "@/lib/session";
 
 const NAV: { href: string; label: string; icon: ReactNode; group: string }[] = [
-  { href: "/admin", label: "Resumen", group: "OperaciÃ³n", icon: <IconGrid /> },
-  { href: "/admin/pedidos", label: "Pedidos", group: "OperaciÃ³n", icon: <IconReceipt /> },
-  { href: "/admin/envios", label: "EnvÃ­os", group: "OperaciÃ³n", icon: <IconTruck /> },
-  { href: "/admin/productos", label: "Productos", group: "CatÃ¡logo", icon: <IconTag /> },
-  { href: "/admin/categorias", label: "CategorÃ­as y tallas", group: "CatÃ¡logo", icon: <IconRuler /> },
-  { href: "/admin/inventario", label: "Inventario", group: "CatÃ¡logo", icon: <IconBox /> },
+  { href: "/admin", label: "Resumen", group: "Operación", icon: <IconGrid /> },
+  { href: "/admin/pedidos", label: "Pedidos", group: "Operación", icon: <IconReceipt /> },
+  { href: "/admin/envios", label: "Envíos", group: "Operación", icon: <IconTruck /> },
+  { href: "/admin/productos", label: "Productos", group: "Catálogo", icon: <IconTag /> },
+  { href: "/admin/categorias", label: "Categorías y tallas", group: "Catálogo", icon: <IconRuler /> },
+  { href: "/admin/inventario", label: "Inventario", group: "Catálogo", icon: <IconBox /> },
   { href: "/admin/clientes", label: "Clientes", group: "Crecimiento", icon: <IconUsers /> },
   { href: "/admin/promos", label: "Promos y combos", group: "Crecimiento", icon: <IconPercent /> },
   { href: "/admin/diseno", label: "Diseño del home", group: "Crecimiento", icon: <IconLayout /> },
 
-  { href: "/admin/auditoria", label: "AuditorÃ­a", group: "Control", icon: <IconShield /> },
+  { href: "/admin/auditoria", label: "Auditoría", group: "Control", icon: <IconShield /> },
 ];
 
-const GROUPS = ["OperaciÃ³n", "CatÃ¡logo", "Crecimiento", "Control"];
+const GROUPS = ["Operación", "Catálogo", "Crecimiento", "Control"];
 
 export function AdminShell({ actor, children }: { actor: Actor; children: ReactNode }) {
   const pathname = usePathname();
@@ -53,10 +53,10 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
 
   return (
     <div className="dash flex min-h-screen">
-      {/* ---------- overlay mÃ³vil ---------- */}
+      {/* ---------- overlay móvil ---------- */}
       {open && (
         <button
-          aria-label="Cerrar menÃº"
+          aria-label="Cerrar menú"
           onClick={() => setOpen(false)}
           className="fixed inset-0 z-40 bg-[#241a10]/60 backdrop-blur-sm lg:hidden"
         />
@@ -85,7 +85,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
             className="rounded-md p-1 text-white/60 hover:bg-white/10 lg:hidden"
             aria-label="Cerrar"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -121,7 +121,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
         </nav>
 
         <div className="border-t border-white/10 p-3">
-          <p className="text-[0.58rem] font-bold tracking-[0.2em] text-white/35 uppercase">SesiÃ³n</p>
+          <p className="text-[0.58rem] font-bold tracking-[0.2em] text-white/35 uppercase">Sesión</p>
           <p className="mt-1 text-xs font-medium text-white">{actor.name}</p>
           <p className="mt-0.5 text-[0.65rem] leading-snug text-white/45">
             {actor.canHardDelete
@@ -146,7 +146,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
             href="/"
             className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 hover:border-[var(--d-gold)] hover:text-white"
           >
-            â†— Ver la tienda
+            ↗ Ver la tienda
           </Link>
         </div>
       </aside>
@@ -157,13 +157,13 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
           <button
             onClick={() => setOpen(true)}
             className="dash-btn px-2.5 py-1.5 lg:hidden"
-            aria-label="Abrir menÃº"
+            aria-label="Abrir menú"
           >
-            â˜°
+            ☰
           </button>
           <div className="min-w-0 flex-1">
             <p className="text-[0.6rem] font-bold tracking-[0.18em] text-[var(--d-ink-soft)] uppercase">
-              Coralina Â· Consola de operaciÃ³n
+              Coralina · Consola de operación
             </p>
             <p className="truncate text-sm font-semibold">{current?.label ?? "Dashboard"}</p>
           </div>
@@ -171,7 +171,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
             {actor.role}
           </span>
           <Link href="/" className="dash-btn hidden sm:inline-flex">
-            Ver tienda â†—
+            Ver tienda ↗
           </Link>
         </header>
         <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
@@ -180,7 +180,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
   );
 }
 
-/* ---------------- iconos de lÃ­nea, propios ---------------- */
+/* ---------------- iconos de línea, propios ---------------- */
 function base(p: { children: ReactNode }) {
   return (
     <svg
