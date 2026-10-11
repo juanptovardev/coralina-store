@@ -35,8 +35,8 @@ collectUploadNames(
 ok("token simple capturado", set.has("a.jpg"));
 ok("token con ?query → archivo base sigue referenced", set.has("b.jpg"));
 ok("token con #frag → archivo base sigue referenced", set.has("c.png"));
-ok("% malformado no lanza y conserva el token crudo", set.has("pro-50%.jpg"));
-ok("%2F decodificado a /", set.has("ok/slash.jpg"));
+ok("% malformado no lanza y queda crudo", set.has("pro-50%.jpg"));
+ok("%2F queda crudo (sin decode: nunca igualaría un nombre de disco)", set.has("ok%2Fslash.jpg") && !set.has("ok/slash.jpg"));
 ok("URLs externas ignoradas", !set.has("x.jpg"));
 ok("sin capturas espurias", set.size === 5);
 

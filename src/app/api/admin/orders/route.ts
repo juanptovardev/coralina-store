@@ -305,20 +305,45 @@ export async function POST(req: Request) {
     // Operación destructiva multi-tabla: restore de stock + deletes en UNA
     // transacción. Si algo falla no queda stock repuesto con el pedido vivo
     // (un reintento no repone de nuevo). El audit se escribe tras el commit.
-    await db.transaction(async (tx) => {
-      // Reponer stock si el pedido NO estaba cancelado NI devuelto (F5): al
-      // crearse descontó stock; un cancelado ya lo repuso vía transitionTag y
-      // un devuelto lo repuso en la acción "devolucion". Doble reposición =
-      // inflación silenciosa de inventario. Contrato: solo pedidos creados vía
-      // createOrder descontaron (los del seed se insertan directo en SQL).
-      if (order.status !== "canceled" && !order.returnedAt) {
-        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
-        for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+    class HardDeleteRejected extends Error {
+      constructor(readonly status: number, readonly error: string) {
+        super(error);
       }
-      await tx.delete(shipments).where(eq(shipments.orderId, id));
-      await tx.delete(orderItems).where(eq(orderItems.orderId, id));
-      await tx.delete(orders).where(eq(orders.id, id));
-    });
+    }
+    try {
+      await db.transaction(async (tx) => {
+        // La decisión de reponer stock se toma sobre la fila CON lock (FOR
+        // UPDATE, espeja transitionTag/devolucion): un devolucion o cancel
+        // concurrente entre la validación previa y la tx ya habría repuesto el
+        // stock — decidir con la lectura sin lock reproduciría el doble restock.
+        const [fresh] = await tx
+          .select()
+          .from(orders)
+          .where(eq(orders.id, id))
+          .limit(1)
+          .for("update");
+        if (!fresh) {
+          throw new HardDeleteRejected(404, "Pedido no encontrado.");
+        }
+        // Reponer stock si el pedido NO estaba cancelado NI devuelto (F5): al
+        // crearse descontó stock; un cancelado ya lo repuso vía transitionTag y
+        // un devuelto lo repuso en la acción "devolucion". Doble reposición =
+        // inflación silenciosa de inventario. Contrato: solo pedidos creados vía
+        // createOrder descontaron (los del seed se insertan directo en SQL).
+        if (fresh.status !== "canceled" && !fresh.returnedAt) {
+          const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
+          for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+        }
+        await tx.delete(shipments).where(eq(shipments.orderId, id));
+        await tx.delete(orderItems).where(eq(orderItems.orderId, id));
+        await tx.delete(orders).where(eq(orders.id, id));
+      });
+    } catch (e) {
+      if (e instanceof HardDeleteRejected) {
+        return NextResponse.json({ ok: false, error: e.error }, { status: e.status });
+      }
+      throw e;
+    }
 
     await recordAudit({
       actor,

@@ -6,21 +6,15 @@ export const UPLOAD_URL_RE = /\/uploads\/products\/([^"'\s\\/]+)/g;
 /**
  * Recolecta en `into` los nombres de archivo referenciados en cualquier
  * estructura (strings, arrays, objetos anidados — el jsonb de DB editable).
- * Normaliza ?query/#frag (una ref "/x.jpg?v=2" apunta al archivo "x.jpg") y
- * decodifica %xx con fallback crudo: un % malformado no debe tumbar el scan
- * con URIError (frontera, input no confiable).
+ * Normaliza ?query/#frag (una ref "/x.jpg?v=2" apunta al archivo "x.jpg").
+ * Sin decodeURIComponent: los uploads son uuid.ext (nunca van codificados) y
+ * decodificar %xx puede fabricar tokens imposibles (p.ej. %2F → "/") que
+ * jamás igualan un nombre de disco; un % malformado tampoco puede lanzar.
  */
 export function collectUploadNames(value: unknown, into: Set<string>) {
   if (typeof value === "string") {
     for (const m of value.matchAll(UPLOAD_URL_RE)) {
-      const raw = m[1].split(/[?#]/)[0];
-      let name = raw;
-      try {
-        name = decodeURIComponent(raw);
-      } catch {
-        /* token crudo */
-      }
-      into.add(name);
+      into.add(m[1].split(/[?#]/)[0]);
     }
   } else if (Array.isArray(value)) {
     for (const v of value) collectUploadNames(v, into);

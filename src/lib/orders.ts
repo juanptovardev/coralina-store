@@ -314,24 +314,7 @@ export async function transitionTag(
       }
 
       const history = [...order.tagHistory, { tag, at: new Date().toISOString(), by: actor.name }];
-      const wasCanceled = order.status === "canceled";
       const willCancel = tag === "cancelado";
-
-      // Reactivar un pedido cancelado exige re-reservar stock (puede fallar si
-      // ya se vendió). Si no alcanza, la tx hace rollback y nada cambia.
-      if (wasCanceled && !willCancel) {
-        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-        for (const it of items) {
-          const ok = await decrementStock(it.variantId, it.quantity, tx);
-          if (!ok) {
-            throw new TagTransitionRejected({
-              ok: false,
-              status: 400,
-              error: `Sin stock suficiente para ${it.productTitle} · talla ${it.size}.`,
-            });
-          }
-        }
-      }
 
       await tx
         .update(orders)
@@ -352,32 +335,21 @@ export async function transitionTag(
         })
         .where(eq(orders.id, orderId));
 
-      // Primera cancelación: se devuelve el stock UNA sola vez y se archiva el
-      // envío. Si el pedido ya fue devuelto (F5), el stock ya se repuso en la
-      // devolución: reponer de nuevo inflaría el inventario.
-      if (willCancel && !wasCanceled && !order.returnedAt) {
-        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-        for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+      // Primera cancelación: el envío se archiva SIEMPRE (si no quedaría
+      // colgado en el tablero: el job de 24h solo archiva "completado"). El
+      // stock solo se repone si el pedido NO fue devuelto (F5): la devolución
+      // ya lo repuso una vez; reponer de nuevo inflaría el inventario.
+      // Nota: reactivar un cancelado es imposible hoy (canChangeTag rechaza
+      // toda salida de "cancelado"), por eso no hay rama de re-reserva.
+      if (willCancel) {
+        if (!order.returnedAt) {
+          const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+          for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+        }
         await tx
           .update(shipments)
           .set({ status: "archivado", archivedAt: new Date() })
           .where(eq(shipments.orderId, orderId));
-      } else if (wasCanceled && !willCancel) {
-        // Reactivación: el envío archivado vuelve al tablero en Revisión.
-        const [sh] = await tx.select().from(shipments).where(eq(shipments.orderId, orderId)).limit(1);
-        if (sh && sh.status === "archivado") {
-          await tx
-            .update(shipments)
-            .set({
-              status: "revision",
-              archivedAt: null,
-              statusHistory: [
-                ...sh.statusHistory,
-                { status: "revision", at: new Date().toISOString(), by: actor.name },
-              ],
-            })
-            .where(eq(shipments.orderId, orderId));
-        }
       }
 
       await recordAudit(
