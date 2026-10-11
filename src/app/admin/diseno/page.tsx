@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, ConfirmDialog, PageHeader, Skeleton, Toast, useBusy, useJson } from "@/components/admin/ui";
+import {
+  Badge,
+  Card,
+  ConfirmDialog,
+  notify,
+  PageHeader,
+  Skeleton,
+  Toast,
+  useBusy,
+  useJson,
+  postJson,
+} from "@/components/admin/ui";
 import { LayoutZoneGuide } from "@/components/admin/LayoutZoneGuide";
 import { HomeRenderer, type HomeCategory, type HomeProduct } from "@/components/storefront/HomeRenderer";
 import { StoreProvider } from "@/components/storefront/shop";
@@ -54,8 +65,6 @@ export default function DisenoPage() {
   const [draft, setDraft] = useState<Layout | null>(null);
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [tokens, setTokens] = useState<Record<string, string>>({});
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const [resetColors, setResetColors] = useState(false);
   const { busy, run } = useBusy();
 
@@ -95,17 +104,11 @@ export default function DisenoPage() {
     });
   }
 
-  async function post(body: Record<string, unknown>) {
-    const res = await fetch("/api/admin/design", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    setTone(json.ok ? "ok" : "error");
-    setToast(json.ok ? "Listo" : json.error);
-    if (json.ok) reload();
-    return json.ok as boolean;
+  async function post(body: Record<string, unknown>, successMsg = "Listo") {
+    const { ok, error } = await postJson("/api/admin/design", body);
+    notify(ok ? successMsg : (error ?? "Error"), ok ? "ok" : "error");
+    if (ok) reload();
+    return ok;
   }
 
   const checklist = draft ? publishChecklist(draft) : [];
@@ -441,14 +444,17 @@ export default function DisenoPage() {
                     disabled={busy}
                     onClick={() =>
                       run(() =>
-                        post({
-                          action: "save_layout",
-                          id: draft.id,
-                          name: draft.name,
-                          banner: draft.banner,
-                          widgets: draft.widgets,
-                          sections: draft.sections,
-                        }),
+                        post(
+                          {
+                            action: "save_layout",
+                            id: draft.id,
+                            name: draft.name,
+                            banner: draft.banner,
+                            widgets: draft.widgets,
+                            sections: draft.sections,
+                          },
+                          "Borrador guardado",
+                        ),
                       )
                     }
                   >
@@ -459,15 +465,18 @@ export default function DisenoPage() {
                     disabled={!canPublish || busy}
                     onClick={() =>
                       run(async () => {
-                        const saved = await post({
-                          action: "save_layout",
-                          id: draft.id,
-                          name: draft.name,
-                          banner: draft.banner,
-                          widgets: draft.widgets,
-                          sections: draft.sections,
-                        });
-                        if (saved) await post({ action: "publish", id: draft.id });
+                        const saved = await post(
+                          {
+                            action: "save_layout",
+                            id: draft.id,
+                            name: draft.name,
+                            banner: draft.banner,
+                            widgets: draft.widgets,
+                            sections: draft.sections,
+                          },
+                          "Borrador guardado",
+                        );
+                        if (saved) await post({ action: "publish", id: draft.id }, "Home publicado");
                       })
                     }
                   >
@@ -527,7 +536,7 @@ export default function DisenoPage() {
         onConfirm={() => run(() => post({ action: "reset_tokens" }))}
       />
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

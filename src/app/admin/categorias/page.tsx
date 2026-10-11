@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, ConfirmDialog, EmptyState, Modal, PageHeader, Skeleton, Toast, useBusy, useJson } from "@/components/admin/ui";
+import {
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  Modal,
+  notify,
+  PageHeader,
+  Skeleton,
+  Toast,
+  useBusy,
+  useJson,
+  postJson,
+} from "@/components/admin/ui";
 import type { SizeChartColumn, SizeChartRow } from "@/db/schema";
 
 type Cat = {
@@ -21,8 +33,6 @@ export default function CategoriasPage() {
   const [rows, setRows] = useState<SizeChartRow[]>([]);
   const [unit, setUnit] = useState<"cm" | "in">("cm");
   const [backfill, setBackfill] = useState(true);
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const [creating, setCreating] = useState(false);
   const [newCat, setNewCat] = useState({ name: "", description: "", imageUrl: "", inherit: 0 });
   const [confirmBox, setConfirmBox] = useState<{
@@ -50,26 +60,24 @@ export default function CategoriasPage() {
   }, [selected, data]);
 
   async function save() {
-    const res = await fetch("/api/admin/catalog", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const { ok, error, json } = await postJson<{ createdVariants?: number }>(
+      "/api/admin/catalog",
+      {
         action: "save_size_chart",
         categoryId: selected,
         columns,
         rows,
         unit,
         backfillVariants: backfill,
-      }),
-    });
-    const json = await res.json();
-    setTone(json.ok ? "ok" : "error");
-    setToast(
-      json.ok
-        ? `Tabla guardada${json.createdVariants ? ` · ${json.createdVariants} variantes nuevas creadas` : ""}`
-        : json.error,
+      },
     );
-    if (json.ok) reload();
+    notify(
+      ok
+        ? `Tabla guardada${json.createdVariants ? ` · ${json.createdVariants} variantes nuevas creadas` : ""}`
+        : (error ?? "Error al guardar"),
+      ok ? "ok" : "error",
+    );
+    if (ok) reload();
   }
 
   function convert(next: "cm" | "in") {
@@ -329,21 +337,15 @@ export default function CategoriasPage() {
             disabled={busy}
             onClick={() =>
               run(async () => {
-                const res = await fetch("/api/admin/catalog", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    action: "create_category",
-                    name: newCat.name,
-                    description: newCat.description,
-                    imageUrl: newCat.imageUrl,
-                    inheritFromCategoryId: newCat.inherit,
-                  }),
+                const { ok, error } = await postJson("/api/admin/catalog", {
+                  action: "create_category",
+                  name: newCat.name,
+                  description: newCat.description,
+                  imageUrl: newCat.imageUrl,
+                  inheritFromCategoryId: newCat.inherit,
                 });
-                const json = await res.json();
-                setTone(json.ok ? "ok" : "error");
-                setToast(json.ok ? "Categoría creada" : json.error);
-                if (json.ok) {
+                notify(ok ? "Categoría creada" : (error ?? "Error al crear"), ok ? "ok" : "error");
+                if (ok) {
                   setCreating(false);
                   setNewCat({ name: "", description: "", imageUrl: "", inherit: 0 });
                   reload();
@@ -365,7 +367,7 @@ export default function CategoriasPage() {
         onConfirm={() => confirmBox?.onOk()}
       />
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

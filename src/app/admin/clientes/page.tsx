@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, Drawer, PageHeader, Stat, Toast, useJson } from "@/components/admin/ui";
+import { Badge, Card, Drawer, notify, PageHeader, Stat, Toast, useJson, postJson } from "@/components/admin/ui";
 import { formatCOP } from "@/lib/constants";
 
 type CustomerRow = {
@@ -52,8 +52,6 @@ export default function ClientesPage() {
   const [sortLtv, setSortLtv] = useState(true); // ↓ Mayor LTV primero (default v4)
   const [open, setOpen] = useState<CustomerRow | null>(null);
   const [history, setHistory] = useState<OrderHist[] | null>(null);
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q), 280);
@@ -268,20 +266,17 @@ export default function ClientesPage() {
                 onBlur={async (e) => {
                   const notes = e.target.value;
                   if (notes === open.notes) return;
-                  const res = await fetch("/api/admin/customers", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ action: "update_notes", id: open.id, notes }),
+                  const { ok, error } = await postJson("/api/admin/customers", {
+                    action: "update_notes",
+                    id: open.id,
+                    notes,
                   });
-                  const json = await res.json();
-                  if (!res.ok || !json.ok) {
-                    setTone("error");
-                    setToast(json.error ?? "No se pudieron guardar las notas");
+                  if (!ok) {
+                    notify(error ?? "No se pudieron guardar las notas", "error");
                     return;
                   }
                   setOpen({ ...open, notes });
-                  setTone("ok");
-                  setToast("Notas guardadas (auditadas)");
+                  notify("Notas guardadas (auditadas)");
                 }}
               />
             </Card>
@@ -289,7 +284,7 @@ export default function ClientesPage() {
         )}
       </Drawer>
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

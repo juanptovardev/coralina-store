@@ -7,11 +7,13 @@ import {
   EmptyState,
   HardDeleteDialog,
   Modal,
+  notify,
   PageHeader,
   Skeleton,
   Toast,
   useBusy,
   useJson,
+  postJson,
 } from "@/components/admin/ui";
 import { formatCOP } from "@/lib/constants";
 import type { StoreProduct } from "@/lib/queries";
@@ -53,8 +55,6 @@ export default function PromosPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [target, setTarget] = useState<Promo | null>(null);
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const { busy, run } = useBusy();
   const [form, setForm] = useState({
     name: "",
@@ -96,17 +96,10 @@ export default function PromosPage() {
   }, [catalog, data]);
 
   async function post(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-    const res = await fetch("/api/admin/promos", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    const ok = Boolean(res.ok && json.ok);
-    setTone(ok ? "ok" : "error");
-    setToast(ok ? "Listo" : json.error);
+    const { ok, error } = await postJson("/api/admin/promos", body);
+    notify(ok ? "Listo" : (error ?? "Error"), ok ? "ok" : "error");
     if (ok) reload();
-    return { ok, error: ok ? undefined : json.error };
+    return { ok, error };
   }
 
   const promos = data?.promotions ?? [];
@@ -382,17 +375,22 @@ export default function PromosPage() {
         expectedText={target?.name ?? ""}
         description="La promoción se elimina definitivamente del motor de precios. Si solo quieres detenerla, usa Pausar."
         onConfirm={async (_confirmText, password) => {
-          const { ok, error } = await post({ action: "delete", id: target?.id, password });
+          // postJson directo (no post()): un solo toast específico, sin el "Listo" genérico.
+          const { ok, error } = await postJson("/api/admin/promos", {
+            action: "delete",
+            id: target?.id,
+            password,
+          });
           if (ok) {
-            setTone("ok");
-            setToast("Promoción eliminada definitivamente");
+            notify("Promoción eliminada definitivamente");
+            reload();
             return null;
           }
           return error ?? "No se pudo eliminar la promoción.";
         }}
       />
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

@@ -9,12 +9,14 @@ import {
   EmptyState,
   HardDeleteDialog,
   Modal,
+  notify,
   PageHeader,
   Skeleton,
   Toast,
   useBusy,
   useDebouncedValue,
   useJson,
+  postJson,
 } from "@/components/admin/ui";
 import { ProductWizard } from "@/components/admin/ProductWizard";
 import { formatCOP } from "@/lib/constants";
@@ -36,8 +38,6 @@ export default function ProductosPage() {
   );
   const { data: actor } = useJson<Actor>("/api/admin/session");
   const [wizard, setWizard] = useState(false);
-  const [toast, setToast] = useState("");
-  const [toastTone, setToastTone] = useState<"ok" | "error">("ok");
   const [target, setTarget] = useState<StoreProduct | null>(null);
   const [editing, setEditing] = useState<StoreProduct | null>(null);
   const [filter, setFilter] = useState("");
@@ -55,13 +55,8 @@ export default function ProductosPage() {
   );
 
   async function call(body: Record<string, unknown>): Promise<string | null> {
-    const res = await fetch("/api/admin/catalog", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) return json.error ?? "Error inesperado";
+    const { ok, error } = await postJson("/api/admin/catalog", body);
+    if (!ok) return error ?? "Error inesperado";
     reload();
     return null;
   }
@@ -97,12 +92,17 @@ export default function ProductosPage() {
 
       {loading ? (
         <Skeleton rows={6} />
-      ) : products.length === 0 ? (
+      ) : (data?.products.length ?? 0) === 0 ? (
         <EmptyState
           title="Aún no hay productos"
           hint="Crea el primero: elige categoría, marca las tallas y el sistema hace el resto."
           actionLabel="Añadir producto"
           onAction={() => setWizard(true)}
+        />
+      ) : products.length === 0 ? (
+        <EmptyState
+          title="Sin productos con ese filtro"
+          hint={`Ningún producto coincide con «${dFilter}». Prueba con otro nombre.`}
         />
       ) : (
         <div className="dash-panel dash-scroll overflow-auto scroll-thin">
@@ -172,8 +172,10 @@ export default function ProductosPage() {
                               id: p.id,
                               status: p.status === "published" ? "draft" : "published",
                             });
-                            setToastTone(err ? "error" : "ok");
-                            setToast(err ?? (p.status === "published" ? "Producto despublicado" : "Producto publicado"));
+                            notify(
+                              err ?? (p.status === "published" ? "Producto despublicado" : "Producto publicado"),
+                              err ? "error" : "ok",
+                            );
                           })
                         }
                       >
@@ -190,8 +192,7 @@ export default function ProductosPage() {
                             onOk: () =>
                               run(async () => {
                                 const err = await call({ action: "delete_product", id: p.id, hard: false });
-                                setToastTone(err ? "error" : "ok");
-                                setToast(err ?? "Producto archivado");
+                                notify(err ?? "Producto archivado", err ? "error" : "ok");
                               }),
                           })
                         }
@@ -223,8 +224,7 @@ export default function ProductosPage() {
           categories={data?.categories ?? []}
           onDone={(msg, tone) => {
             setWizard(false);
-            setToastTone(tone);
-            setToast(msg);
+            notify(msg, tone);
             reload();
           }}
         />
@@ -253,8 +253,7 @@ export default function ProductosPage() {
             }}
             onDone={(msg, tone) => {
               setEditing(null);
-              setToastTone(tone);
-              setToast(msg);
+              notify(msg, tone);
               reload();
             }}
           />
@@ -286,14 +285,13 @@ export default function ProductosPage() {
             password,
           });
           if (!err) {
-            setToastTone("ok");
-            setToast("Producto eliminado definitivamente");
+            notify("Producto eliminado definitivamente");
           }
           return err;
         }}
       />
 
-      <Toast message={toast} tone={toastTone} />
+      <Toast />
     </div>
   );
 }

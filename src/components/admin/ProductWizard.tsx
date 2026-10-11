@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { postJson, useBusy } from "@/components/admin/ui";
 import type { SizeChartColumn, SizeChartRow } from "@/db/schema";
 import { formatCOP } from "@/lib/constants";
 
@@ -56,7 +57,7 @@ export function ProductWizard({
   const [uploadErr, setUploadErr] = useState("");
   const [featured, setFeatured] = useState(initial ? initial.tags.includes("home") : true);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, run } = useBusy();
 
   const category = categories.find((c) => c.id === categoryId) ?? null;
   const chartRows = category?.chart?.rows ?? [];
@@ -105,21 +106,16 @@ export function ProductWizard({
 
   async function submit(status: "draft" | "published" | "archived") {
     setError("");
-    setBusy(true);
-    const res = await fetch("/api/admin/catalog", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(
+    await run(async () => {
+      const { ok, error } = await postJson("/api/admin/catalog",
         initial
           ? {
               action: "update_product",
               id: initial.id,
               title,
-              description,
               categoryId,
               priceCents: Math.round(Number(price || 0) * 100),
               compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
-              images,
               status,
             }
           : {
@@ -134,22 +130,20 @@ export function ProductWizard({
               tags: featured ? ["home"] : [],
               status,
             },
-      ),
+      );
+      if (!ok) {
+        setError(error ?? "No se pudo guardar.");
+        return;
+      }
+      onDone(
+        initial
+          ? "Producto actualizado"
+          : status === "published"
+            ? "Producto publicado en la tienda"
+            : "Borrador guardado",
+        "ok",
+      );
     });
-    const json = await res.json();
-    setBusy(false);
-    if (!res.ok || !json.ok) {
-      setError(json.error ?? "No se pudo guardar.");
-      return;
-    }
-    onDone(
-      initial
-        ? "Producto actualizado"
-        : status === "published"
-          ? "Producto publicado en la tienda"
-          : "Borrador guardado",
-      "ok",
-    );
   }
 
   return (
@@ -181,9 +175,15 @@ export function ProductWizard({
             <textarea
               className="admin-input h-28"
               value={description}
+              disabled={editing}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Triangular con lazos ajustables, tela italiana UV50+…"
             />
+            {editing && (
+              <p className="mt-1 text-[0.7rem] opacity-60">
+                La descripción solo se edita al crear el producto (la API de update no la modifica).
+              </p>
+            )}
           </div>
           <label className="flex items-center gap-2 text-xs">
             <input
@@ -273,59 +273,81 @@ export function ProductWizard({
               <input className="admin-input" value={compareAt} onChange={(e) => setCompareAt(e.target.value)} placeholder="339000" />
             </div>
           </div>
-          <div>
-            <label className="admin-label">Imágenes (sube un archivo o pega la URL)</label>
-            <div className="flex gap-2">
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
-                className="admin-input shrink-0 text-xs"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadFile(f);
-                  e.target.value = "";
-                }}
-              />
-              {uploading && <span className="self-center text-xs opacity-60">Subiendo…</span>}
-            </div>
-            {uploadErr && <p className="mt-1 text-xs text-red-400">{uploadErr}</p>}
-            <div className="mt-2 flex gap-2">
-              <input
-                className="admin-input"
-                value={imageInput}
-                onChange={(e) => setImageInput(e.target.value)}
-                placeholder="https://…"
-              />
-              <button
-                className="dash-btn shrink-0 text-xs"
-                onClick={() => {
-                  if (!imageInput.startsWith("http")) return;
-                  setImages([...images, imageInput]);
-                  setImageInput("");
-                }}
-              >
-                Añadir
-              </button>
-            </div>
-            <p className="mt-1 text-xs opacity-50">Desde tu equipo (máx 5 MB) o URL externa.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {images.map((img, i) => (
-                <div key={img} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
-                  {i === 0 && (
-                    <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
-                  )}
+          {!editing ? (
+            <>
+              <div>
+                <label className="admin-label">Imágenes (sube un archivo o pega la URL)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
+                    className="admin-input shrink-0 text-xs"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void uploadFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  {uploading && <span className="self-center text-xs opacity-60">Subiendo…</span>}
+                </div>
+                {uploadErr && <p className="mt-1 text-xs text-red-400">{uploadErr}</p>}
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className="admin-input"
+                    value={imageInput}
+                    onChange={(e) => setImageInput(e.target.value)}
+                    placeholder="https://…"
+                  />
                   <button
-                    className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs text-white"
-                    onClick={() => void removeImage(img)}
+                    className="dash-btn shrink-0 text-xs"
+                    onClick={() => {
+                      if (!imageInput.startsWith("http")) return;
+                      setImages([...images, imageInput]);
+                      setImageInput("");
+                    }}
                   >
-                    ×
+                    Añadir
                   </button>
                 </div>
-              ))}
-            </div>
-          </div>
+                <p className="mt-1 text-xs opacity-50">Desde tu equipo (máx 5 MB) o URL externa.</p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {images.map((img, i) => (
+                  <div key={img} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
+                    {i === 0 && (
+                      <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
+                    )}
+                    <button
+                      className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs text-white"
+                      onClick={() => void removeImage(img)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {images.map((img, i) => (
+                  <div key={img} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
+                    {i === 0 && (
+                      <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs opacity-50">
+                Las imágenes no se editan aquí: la API de update no las modifica y borrarlas
+                rompería la ficha de la tienda. Se gestionan al crear o re-creando el producto.
+              </p>
+            </>
+          )}
         </div>
       )}
 

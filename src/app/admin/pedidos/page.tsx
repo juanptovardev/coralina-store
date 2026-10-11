@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Card,
@@ -9,6 +9,7 @@ import {
   EmptyState,
   HardDeleteDialog,
   Modal,
+  notify,
   PageHeader,
   Skeleton,
   Stat,
@@ -16,6 +17,7 @@ import {
   useBusy,
   useDebouncedValue,
   useJson,
+  postJson,
 } from "@/components/admin/ui";
 import { OPERATIONAL_TAGS, TAG_FLOW, formatCOP } from "@/lib/constants";
 import type { StoreProduct } from "@/lib/queries";
@@ -75,8 +77,6 @@ export default function PedidosPage() {
   const [open, setOpen] = useState<OrderRow | null>(null);
   const [manual, setManual] = useState(false);
   const [target, setTarget] = useState<OrderRow | null>(null);
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const [confirmBox, setConfirmBox] = useState<{
     title: string;
     message: string;
@@ -120,31 +120,23 @@ export default function PedidosPage() {
   }, [reload]);
 
   async function post(body: Record<string, unknown>): Promise<string | null> {
-    const res = await fetch("/api/admin/orders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) return json.error ?? "Error inesperado";
+    const { ok, error } = await postJson("/api/admin/orders", body);
+    if (!ok) return error ?? "Error inesperado";
     reload();
     return null;
   }
 
   async function bulkApply(tag: string) {
-    const res = await fetch("/api/admin/orders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "bulk_tag", orderIds: selected, tag }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
-      setTone("error");
-      setToast(json.errors?.[0] ?? json.error ?? "No se pudo aplicar el tag");
+    const { ok, error, json } = await postJson<{
+      changed?: number;
+      total?: number;
+      errors?: string[];
+    }>("/api/admin/orders", { action: "bulk_tag", orderIds: selected, tag });
+    if (!ok) {
+      notify(json.errors?.[0] ?? error ?? "No se pudo aplicar el tag", "error");
       return;
     }
-    setTone("ok");
-    setToast(`${json.changed}/${json.total} pedido(s) → ${tag}`);
+    notify(`${json.changed ?? 0}/${json.total ?? selected.length} pedido(s) → ${tag}`);
     setSelected([]);
     reload();
   }
@@ -175,7 +167,7 @@ export default function PedidosPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Hoy" value={String(metrics.today ?? 0)} hint="Últimas 24h" />
+        <Stat label="Hoy" value={String(metrics.today ?? 0)} hint="día natural UTC" />
         <Stat label="Semana" value={String(metrics.week ?? 0)} />
         <Stat label="Mes" value={String(metrics.month ?? 0)} hint={formatCOP(metrics.revenueMonth ?? 0)} />
         <Stat label="Ticket promedio" value={formatCOP(metrics.avgTicket ?? 0)} />
@@ -268,8 +260,7 @@ export default function PedidosPage() {
               className="dash-btn"
               onClick={() => {
                 reload();
-                setTone("ok");
-                setToast("Lista actualizada");
+                notify("Lista actualizada");
               }}
             >
               ↻ Actualizar
@@ -300,8 +291,7 @@ export default function PedidosPage() {
                 disabled={busy}
                 onClick={() => {
                   if (!bulkTag) {
-                    setTone("error");
-                    setToast("Elige un estado primero");
+                    notify("Elige un estado primero", "error");
                     return;
                   }
                   const tag = bulkTag;
@@ -401,8 +391,7 @@ export default function PedidosPage() {
                             const tag = e.target.value;
                             void run(async () => {
                               const err = await post({ action: "set_tag", orderId: o.id, tag });
-                              setTone(err ? "error" : "ok");
-                              setToast(err ?? `Pedido ${o.displayId} → ${tag}`);
+                              notify(err ?? `Pedido ${o.displayId} → ${tag}`, err ? "error" : "ok");
                             });
                           }}
                         >
@@ -489,8 +478,7 @@ export default function PedidosPage() {
                       const back = TAG_FLOW.indexOf(t) < TAG_FLOW.indexOf(open.operationalTag as never);
                       const apply = async () => {
                         const err = await post({ action: "set_tag", orderId: open.id, tag: t });
-                        setTone(err ? "error" : "ok");
-                        setToast(err ?? "Estado actualizado");
+                        notify(err ?? "Estado actualizado", err ? "error" : "ok");
                         setOpen(null);
                       };
                       if (back) {
@@ -518,8 +506,7 @@ export default function PedidosPage() {
                         "Cancelar el pedido devuelve el stock y archiva su envío. ¿Confirmas?",
                       onOk: async () => {
                         const err = await post({ action: "set_tag", orderId: open.id, tag: "cancelado" });
-                        setTone(err ? "error" : "ok");
-                        setToast(err ?? "Pedido cancelado y stock devuelto");
+                        notify(err ?? "Pedido cancelado y stock devuelto", err ? "error" : "ok");
                         setOpen(null);
                       },
                     });
@@ -552,9 +539,13 @@ export default function PedidosPage() {
                 className="admin-input mt-1 h-20"
                 defaultValue={open.notes}
                 onBlur={async (e) => {
-                  const err = await post({ action: "save_notes", orderId: open.id, notes: e.target.value });
-                  setTone(err ? "error" : "ok");
-                  setToast(err ?? "Notas guardadas");
+                  const value = e.target.value;
+                  if (value === open.notes) return;
+                  const err = await post({ action: "save_notes", orderId: open.id, notes: value });
+                  notify(err ?? "Notas guardadas", err ? "error" : "ok");
+                  // Actualiza el baseline: sin esto, el siguiente blur sin cambios
+                  // re-postea y genera auditoría fantasma.
+                  if (!err) setOpen({ ...open, notes: value });
                 }}
               />
             </Card>
@@ -574,8 +565,7 @@ export default function PedidosPage() {
         onClose={() => setManual(false)}
         onDone={(msg, t) => {
           setManual(false);
-          setTone(t);
-          setToast(msg);
+          notify(msg, t);
           reload();
         }}
       />
@@ -591,8 +581,7 @@ export default function PedidosPage() {
           const err = await post({ action: "hard_delete", orderId: target?.id, confirmText, password });
           if (!err) {
             setOpen(null);
-            setTone("ok");
-            setToast("Pedido eliminado definitivamente");
+            notify("Pedido eliminado definitivamente");
           }
           return err;
         }}
@@ -607,7 +596,7 @@ export default function PedidosPage() {
         onConfirm={() => confirmBox?.onOk()}
       />
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }
@@ -638,7 +627,7 @@ function ManualOrderModal({
   const [notes, setNotes] = useState("");
   const [totals, setTotals] = useState<{ subtotalCents: number; discountCents: number; totalCents: number; applied: { id: number; label: string; amountCents: number }[] } | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, run } = useBusy();
 
   const products = data?.products ?? [];
   const options = useMemo(
@@ -658,16 +647,26 @@ function ManualOrderModal({
       setTotals(null);
       return;
     }
-    fetch("/api/admin/orders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        action: "preview_totals",
-        items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
-      }),
-    })
-      .then((r) => r.json())
-      .then(setTotals);
+    void postJson<{
+      subtotalCents?: number;
+      discountCents?: number;
+      totalCents?: number;
+      applied?: { id: number; label: string; amountCents: number }[];
+    }>("/api/admin/orders", {
+      action: "preview_totals",
+      items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+    }).then(({ ok, json }) => {
+      setTotals(
+        ok && typeof json.subtotalCents === "number"
+          ? {
+              subtotalCents: json.subtotalCents,
+              discountCents: json.discountCents ?? 0,
+              totalCents: json.totalCents ?? 0,
+              applied: json.applied ?? [],
+            }
+          : null,
+      );
+    });
   }, [items]);
 
   return (
@@ -778,35 +777,29 @@ function ManualOrderModal({
           <button
             className="dash-btn dash-btn-primary w-full"
             disabled={busy}
-            onClick={async () => {
-              if (busy) return;
-              setBusy(true);
-              setError("");
-              try {
-                const res = await fetch("/api/admin/orders", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
+            onClick={() =>
+              run(async () => {
+                setError("");
+                const { ok, error, json } = await postJson<{ displayId?: string }>(
+                  "/api/admin/orders",
+                  {
                     action: "create_manual",
                     customer,
                     items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
                     fulfillmentClass: cls,
                     paymentRef: payment,
                     notes,
-                  }),
-                });
-                const json = await res.json();
-                if (!res.ok || !json.ok) {
-                  setError(json.error ?? "No se pudo crear el pedido.");
+                  },
+                );
+                if (!ok) {
+                  setError(error ?? "No se pudo crear el pedido.");
                   return;
                 }
                 setItems([]);
                 setCustomer({ name: "", email: "", phone: "", city: "", address: "" });
                 onDone(`Pedido ${json.displayId} creado`, "ok");
-              } finally {
-                setBusy(false);
-              }
-            }}
+              })
+            }
           >
             Crear pedido
           </button>

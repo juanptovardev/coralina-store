@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 export function PageHeader({
   title,
@@ -210,10 +210,15 @@ function pushToast(message: string, tone: "ok" | "error") {
   }, 4200);
 }
 
-/** Cola de toasts: máx 3 apilados, autodescarte por toast. API previa intacta: <Toast message tone />. */
-export function Toast({ message, tone = "ok" }: { message: string; tone?: "ok" | "error" }) {
+/** Feedback con cola (máx 3, autodescarte). Sin dedupe: dos acciones idénticas
+ *  consecutivas producen dos toasts. Uso: <Toast /> en la página + notify() en handlers. */
+export function notify(message: string, tone: "ok" | "error" = "ok") {
+  if (!message) return;
+  pushToast(message, tone);
+}
+
+export function Toast() {
   const [items, setItems] = useState<ToastItem[]>([]);
-  const lastRef = useRef("");
 
   useEffect(() => {
     toastListeners.add(setItems);
@@ -221,15 +226,6 @@ export function Toast({ message, tone = "ok" }: { message: string; tone?: "ok" |
       toastListeners.delete(setItems);
     };
   }, []);
-
-  useEffect(() => {
-    const key = `${tone}:${message}`;
-    if (message && lastRef.current !== key) {
-      lastRef.current = key;
-      pushToast(message, tone);
-    }
-    if (!message) lastRef.current = "";
-  }, [message, tone]);
 
   if (items.length === 0) return null;
   return (
@@ -248,6 +244,33 @@ export function Toast({ message, tone = "ok" }: { message: string; tone?: "ok" |
       ))}
     </div>
   );
+}
+
+/** Única frontera de red POST del panel: nunca lanza; normaliza {ok,error}+json. */
+export async function postJson<T = Record<string, unknown>>(
+  url: string,
+  body: unknown,
+): Promise<{ ok: boolean; error?: string; json: T }> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json().catch(() => ({}))) as T & { ok?: boolean; error?: string };
+    const ok = Boolean(res.ok && json.ok);
+    return { ok, error: ok ? undefined : String(json.error ?? `HTTP ${res.status}`), json };
+  } catch {
+    return { ok: false, error: "Error de red.", json: {} as T };
+  }
+}
+
+/** Celda CSV segura: entrecomillada, comillas internas duplicadas y prefijo '
+ *  en celdas que empiezan con = + - @ (guardia de inyección de fórmulas). */
+export function csvCell(value: string | number): string {
+  const s = String(value);
+  const guarded = /^[=+@-]/.test(s) ? `'${s}` : s;
+  return `"${guarded.replace(/"/g, '""')}"`;
 }
 
 /** Confirmación propia (reemplaza confirm() nativo) para acciones destructivas suaves. */
@@ -364,10 +387,15 @@ export function HardDeleteDialog({
               style={{ borderColor: "var(--d-danger)" }}
               onClick={async () => {
                 setBusy(true);
-                const err = await onConfirm(text, password);
-                setBusy(false);
-                if (err) setError(err);
-                else onClose();
+                try {
+                  const err = await onConfirm(text, password);
+                  if (err) setError(err);
+                  else onClose();
+                } catch {
+                  setError("Error de red. Intenta de nuevo.");
+                } finally {
+                  setBusy(false);
+                }
               }}
             >
               {busy ? "Eliminando…" : "Eliminar definitivamente"}
@@ -441,6 +469,8 @@ export function useJson<T>(url: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  // Estable entre renders: los intervalos/effects que dependen de reload no se recrean.
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
     let alive = true;
@@ -466,7 +496,7 @@ export function useJson<T>(url: string) {
     };
   }, [url, nonce]);
 
-  return { data, loading, error, reload: () => setNonce((n) => n + 1) };
+  return { data, loading, error, reload };
 }
 
 /** Estado "ocupado" + guardia anti doble-submit para botones de mutación. */

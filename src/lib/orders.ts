@@ -186,10 +186,18 @@ export async function createOrder(
           discountCents: totals.discountCents,
           totalCents: totals.totalCents,
           discountBreakdown: totals.applied.map((a) => ({ label: a.label, amountCents: a.amountCents })),
+          // Atribución de promo (analítica F3): id de la promo aplicada
+          // (single-promo por prioridad; espeja discount_breakdown[0]).
+          promoId: appliedPromo?.id ?? null,
           paymentRef: input.paymentRef ?? "",
           paymentMethod: input.paymentMethod ?? "",
+          // paid_at: el checkout web paga al confirmar (web = pagado en la
+          // creación); los manuales se estampan cuando el tag llega a
+          // completado (transitionTag).
+          paidAt: input.source === "web" ? now : null,
           notes: input.notes ?? "",
           tagHistory: [{ tag: "por_revisar", at: now.toISOString(), by: actor.name }],
+          updatedAt: now,
           idempotencyKey,
         })
         .returning();
@@ -199,6 +207,8 @@ export async function createOrder(
         await tx.insert(orderItems).values({
           orderId: order.id,
           variantId: l.variantId,
+          productId: l.productId,
+          categoryId: l.categoryId,
           productTitle: l.title,
           size: l.size,
           sku: v?.sku ?? "",
@@ -329,6 +339,13 @@ export async function transitionTag(
           operationalTag: tag,
           tagHistory: history,
           status: tag === "completado" ? "completed" : tag === "cancelado" ? "canceled" : "pending",
+          // Ciclo de vida (F3): cancelado estampa canceled_at (solo la primera
+          // vez; re-cancelar no lo pisa) y se limpia al salir del tag.
+          canceledAt: willCancel ? (order.canceledAt ?? new Date()) : null,
+          // Completado estampa paid_at si aún no existe (los web ya lo traen
+          // desde createOrder). undefined = drizzle omite la columna.
+          paidAt: tag === "completado" ? (order.paidAt ?? new Date()) : undefined,
+          updatedAt: new Date(),
         })
         .where(eq(orders.id, orderId));
 

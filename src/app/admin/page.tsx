@@ -1,56 +1,41 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { orders, shipments } from "@/db/schema";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { categoryStockSummary, getActiveLayout, listProducts } from "@/lib/queries";
-import { buildByDay14 } from "@/lib/metrics";
+import { buildOrderMetrics } from "@/lib/metrics";
 import { formatCOP, LAYOUT_PLANE, OPERATIONAL_TAGS, type LayoutMode } from "@/lib/constants";
 import { readBanner } from "@/lib/design";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminHome() {
-  const [layout, products, stock, allOrders, dayRows, [kpi], board] = await Promise.all([
+  const [layout, products, stock, allOrders, metrics, board] = await Promise.all([
     getActiveLayout(),
     listProducts(),
     categoryStockSummary(),
     db.select().from(orders).orderBy(desc(orders.createdAt)).limit(300),
-    // dayRows: lectura ligera sobre TODA la tabla (sin limit) — fuente de las
-    // barras de 14 días, byTag y "Por revisar" (paridad con /api/admin/orders).
-    db
-      .select({ createdAt: orders.createdAt, totalCents: orders.totalCents, operationalTag: orders.operationalTag })
-      .from(orders)
-      .where(and(ne(orders.status, "canceled"), sql`${orders.createdAt} >= now() - interval '14 days'`)),
-    // KPIs como agregados SQL sobre TODA la tabla (mismas reglas que
-    // /api/admin/orders: no cancelados, ventana móvil de 30 días).
-    db
-      .select({
-        today: sql<number>`count(*) filter (where ${orders.status} <> 'canceled' and ${orders.createdAt} >= now() - interval '24 hours')::int`,
-        prevDay: sql<number>`count(*) filter (where ${orders.status} <> 'canceled' and ${orders.createdAt} >= now() - interval '48 hours' and ${orders.createdAt} < now() - interval '24 hours')::int`,
-        month: sql<number>`count(*) filter (where ${orders.status} <> 'canceled' and ${orders.createdAt} >= now() - interval '30 days')::int`,
-        revenueMonth: sql<number>`coalesce(sum(${orders.totalCents}) filter (where ${orders.status} <> 'canceled' and ${orders.createdAt} >= now() - interval '30 days'), 0)::float8`,
-        avgTicket: sql<number>`coalesce(round(avg(${orders.totalCents}) filter (where ${orders.status} <> 'canceled')), 0)::float8`,
-      })
-      .from(orders),
+    // Métricas (KPIs + byTag + barras 14 días): fuente única compartida con
+    // /api/admin/orders — agregados SQL en ventanas UTC (buildOrderMetrics).
+    // Reemplaza el dayRows SQL y los KPIs SQL que vivían acá (dos impls
+    // divergentes); la semántica de números ahora es idéntica en ambos lados.
+    buildOrderMetrics(),
     db.select().from(shipments),
   ]);
 
-  // server component async: corre una vez por request; "hoy" compartido por hourAgo y las barras
+  // server component async: corre una vez por request; "hoy" lo usa hourAgo (envíos +24h)
   const now = Date.now();
   const hourAgo = (h: number) => new Date(now - h * 3600 * 1000);
   const lowStock = stock.reduce((a, s) => a + s.lowCount, 0);
   const plane = LAYOUT_PLANE[layout.mode as LayoutMode] ?? LAYOUT_PLANE.preset_left;
   const inRevision = board.filter((s) => s.status === "revision").length;
   const activeBoard = board.filter((s) => s.status !== "archivado").length;
-  const byTag = dayRows.reduce<Record<string, number>>((acc, o) => {
-    acc[o.operationalTag] = (acc[o.operationalTag] ?? 0) + 1;
-    return acc;
-  }, {});
+  const byTag = metrics.byTag;
   const maxTag = Math.max(1, ...Object.values(byTag));
   const recent = allOrders.slice(0, 6);
 
   /* Necesita atención (estilo v4) */
-  const porRevisar = dayRows.filter((o) => o.operationalTag === "por_revisar").length;
+  const porRevisar = metrics.byTag.por_revisar ?? 0;
   const staleShipments = board.filter(
     (s) => s.status === "revision" && new Date(s.createdAt) < hourAgo(24),
   );
@@ -59,8 +44,8 @@ export default async function AdminHome() {
     .filter((x): x is string => Boolean(x))
     .slice(0, 3);
 
-  /* Barras de los últimos 14 días naturales (fuente única: lib/metrics) */
-  const byDay = buildByDay14(dayRows, now);
+  /* Barras de los últimos 14 días naturales UTC (fuente única: lib/metrics) */
+  const byDay = metrics.byDay;
   const maxDay = Math.max(1, ...byDay.map((d) => d.count));
 
   return (
@@ -96,12 +81,16 @@ export default async function AdminHome() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPI
           label="Pedidos hoy"
-          value={String(kpi.today)}
-          hint={`${kpi.prevDay} el día anterior`}
-          trend={kpi.today >= kpi.prevDay ? "up" : "down"}
+          value={String(metrics.today)}
+          hint={`${metrics.prevDay} el día anterior`}
+          trend={metrics.today >= metrics.prevDay ? "up" : "down"}
         />
-        <KPI label="Pedidos del mes" value={String(kpi.month)} hint={`${formatCOP(kpi.revenueMonth)} facturados`} />
-        <KPI label="Ticket promedio" value={formatCOP(kpi.avgTicket)} hint="Pedidos no cancelados" />
+        <KPI
+          label="Pedidos del mes"
+          value={String(metrics.month)}
+          hint={`${formatCOP(metrics.revenueMonth)} facturados`}
+        />
+        <KPI label="Ticket promedio" value={formatCOP(metrics.avgTicket)} hint="Pedidos no cancelados" />
         <KPI
           label="Variantes bajo umbral"
           value={String(lowStock)}

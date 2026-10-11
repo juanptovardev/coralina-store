@@ -1,7 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Card, EmptyState, PageHeader, Skeleton, Toast, useDebouncedValue, useJson } from "@/components/admin/ui";
+import {
+  Badge,
+  Card,
+  csvCell,
+  EmptyState,
+  notify,
+  PageHeader,
+  Skeleton,
+  Toast,
+  useDebouncedValue,
+  useJson,
+  postJson,
+} from "@/components/admin/ui";
 
 type Summary = {
   categoryId: number;
@@ -38,8 +50,6 @@ export default function InventarioPage() {
   const { data, loading, reload } = useJson<{ summary: Summary[]; levels: Level[] }>("/api/admin/inventory");
   const [category, setCategory] = useState<number | null>(null);
   const [q, setQ] = useState("");
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const dq = useDebouncedValue(q, 300);
 
   const levels = (data?.levels ?? []).filter((l) => {
@@ -49,28 +59,15 @@ export default function InventarioPage() {
   });
 
   async function update(body: Record<string, unknown>) {
-    const res = await fetch("/api/admin/catalog", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json();
-    setTone(json.ok ? "ok" : "error");
-    setToast(json.ok ? "Inventario actualizado" : json.error);
+    const { ok, error } = await postJson("/api/admin/catalog", body);
+    notify(ok ? "Inventario actualizado" : (error ?? "Error al actualizar"), ok ? "ok" : "error");
     reload();
   }
 
-  /** CSV seguro: toda celda entrecomillada, comillas internas duplicadas y
-   *  prefijo ' en celdas que empiezan con = + - @ (guardia de inyección). */
   function exportCsv() {
-    const cell = (v: string | number) => {
-      const s = String(v);
-      const guarded = /^[=+@-]/.test(s) ? `'${s}` : s;
-      return `"${guarded.replace(/"/g, '""')}"`;
-    };
-    const header = ["categoria", "producto", "talla", "sku", "stock", "umbral"].map(cell).join(",");
+    const header = ["categoria", "producto", "talla", "sku", "stock", "umbral"].map(csvCell).join(",");
     const body = levels
-      .map((l) => [l.categoryName, l.productTitle, l.size, l.sku, l.stocked, l.threshold].map(cell).join(","))
+      .map((l) => [l.categoryName, l.productTitle, l.size, l.sku, l.stocked, l.threshold].map(csvCell).join(","))
       .join("\n");
     const url = URL.createObjectURL(new Blob([`${header}\n${body}`], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -231,7 +228,7 @@ export default function InventarioPage() {
         </>
       )}
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

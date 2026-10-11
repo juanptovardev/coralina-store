@@ -127,16 +127,26 @@ export const orders = pgTable(
   discountCents: integer("discount_cents").default(0).notNull(),
   totalCents: integer("total_cents").default(0).notNull(),
   discountBreakdown: jsonb("discount_breakdown").$type<{ label: string; amountCents: number }[]>().default([]).notNull(),
+  // Atribución de promo (analítica): id lógico de la promo aplicada. FK real
+  // (estilo del archivo: todas usan .references()); borrar la promo no toca
+  // el pedido, solo pierde la atribución.
+  promoId: integer("promo_id").references(() => promotions.id, { onDelete: "set null" }),
   paymentRef: text("payment_ref").default("").notNull(),
   paymentMethod: text("payment_method").default("").notNull(),
   notes: text("notes").default("").notNull(),
   tagHistory: jsonb("tag_history").$type<{ tag: string; at: string; by: string }[]>().default([]).notNull(),
   idempotencyKey: text("idempotency_key").unique(),
+  // Timestamps de ciclo de vida (F3): todos nullables (migración aditiva).
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  canceledAt: timestamp("canceled_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
   (t) => ({
     createdAtIdx: index("orders_created_at_idx").on(t.createdAt),
     customerStatusIdx: index("orders_customer_status_idx").on(t.customerId, t.status),
+    promoIdx: index("orders_promo_id_idx").on(t.promoId),
   }),
 );
 
@@ -150,13 +160,20 @@ export const orderItems = pgTable(
     variantId: integer("variant_id")
       .notNull()
       .references(() => variants.id, { onDelete: "restrict" }),
+    // Desnormalización analítica (F3): snapshot de producto/categoría al
+    // vender; evita el join variants→products en queries de top productos.
+    productId: integer("product_id"),
+    categoryId: integer("category_id"),
     productTitle: text("product_title").notNull(),
     size: text("size").notNull(),
     sku: text("sku").notNull(),
     unitPriceCents: integer("unit_price_cents").notNull(),
     quantity: integer("quantity").notNull(),
   },
-  (t) => ({ orderIdx: index("order_items_order_id_idx").on(t.orderId) }),
+  (t) => ({
+    orderIdx: index("order_items_order_id_idx").on(t.orderId),
+    productIdx: index("order_items_product_id_idx").on(t.productId),
+  }),
 );
 
 export type ShipmentStatus = "revision" | "despacho" | "reparto" | "completado" | "archivado";

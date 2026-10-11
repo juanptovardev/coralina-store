@@ -1,7 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Card, EmptyState, Modal, PageHeader, Skeleton, Toast, useJson } from "@/components/admin/ui";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  Modal,
+  notify,
+  PageHeader,
+  Skeleton,
+  Toast,
+  useBusy,
+  useJson,
+  postJson,
+} from "@/components/admin/ui";
 import type { Actor } from "@/lib/session";
 
 type Entry = {
@@ -54,13 +66,12 @@ export default function AuditoriaPage() {
     pageSize: number;
   }>(`/api/admin/audit?${query}`);
   const { data: actor } = useJson<Actor>("/api/admin/session");
+  const { busy, run } = useBusy();
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [month, setMonth] = useState("");
   const [confirmText, setConfirmText] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
 
   const entries = data?.entries ?? [];
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / (data?.pageSize ?? AUDIT_PAGE_SIZE)));
@@ -80,7 +91,17 @@ export default function AuditoriaPage() {
             <a className="dash-btn" href={`/api/admin/audit?${query}&format=csv`}>
               Exportar CSV
             </a>
-            <button className="dash-btn dash-btn-primary" onClick={() => setPurgeOpen(true)}>
+            <button
+              className="dash-btn dash-btn-primary"
+              onClick={() => {
+                // Higiene: nunca reutilizar credenciales/campos de una purga anterior.
+                setMonth("");
+                setConfirmText("");
+                setPassword("");
+                setError("");
+                setPurgeOpen(true);
+              }}
+            >
               Purgar un mes
             </button>
           </>
@@ -217,32 +238,33 @@ export default function AuditoriaPage() {
             {error && <p className="text-xs text-[var(--d-danger)]">{error}</p>}
             <button
               className="w-full rounded-full bg-[#b3261e] px-5 py-2.5 text-sm text-white disabled:opacity-40"
-              disabled={!month || confirmText !== month || !password}
-              onClick={async () => {
-                setError("");
-                const res = await fetch("/api/admin/audit", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ action: "purge_month", month, confirmText, password }),
-                });
-                const json = await res.json();
-                if (!res.ok || !json.ok) {
-                  setError(json.error ?? "No se pudo purgar.");
-                  return;
-                }
-                setPurgeOpen(false);
-                setTone("ok");
-                setToast(`Purgados ${json.deleted} registros de ${month}`);
-                reload();
-              }}
+              disabled={!month || confirmText !== month || !password || busy}
+              onClick={() =>
+                run(async () => {
+                  setError("");
+                  const { ok, error, json } = await postJson<{ deleted?: number }>("/api/admin/audit", {
+                    action: "purge_month",
+                    month,
+                    confirmText,
+                    password,
+                  });
+                  if (!ok) {
+                    setError(error ?? "No se pudo purgar.");
+                    return;
+                  }
+                  setPurgeOpen(false);
+                  notify(`Purgados ${json.deleted} registros de ${month}`);
+                  reload();
+                })
+              }
             >
-              Purgar mes definitivamente
+              {busy ? "Purgando…" : "Purgar mes definitivamente"}
             </button>
           </div>
         )}
       </Modal>
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }

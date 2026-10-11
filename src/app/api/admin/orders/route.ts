@@ -6,7 +6,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
 import { OPERATIONAL_TAGS } from "@/lib/constants";
 import { transitionTag, createOrder, buildCartLines, restoreStock } from "@/lib/orders";
-import { buildByDay14 } from "@/lib/metrics";
+import { buildOrderMetrics } from "@/lib/metrics";
 import { evaluateCart } from "@/lib/promo";
 import { pageParams } from "@/lib/page-params";
 import { getActor } from "@/lib/session";
@@ -40,24 +40,11 @@ export async function GET(req: Request) {
     shipment: ships.find((s) => s.orderId === o.id) ?? null,
   }));
 
-  const now = Date.now();
-  const since = (h: number) => new Date(now - h * 3600 * 1000);
-  const inRange = (d: Date, h: number) => d >= since(h);
-  const revenue = (list: typeof rows) => list.reduce((a, r) => a + r.o.totalCents, 0);
-  const valid = rows.filter((r) => r.o.status !== "canceled");
-
-  const metrics = {
-    today: valid.filter((r) => inRange(r.o.createdAt, 24)).length,
-    week: valid.filter((r) => inRange(r.o.createdAt, 24 * 7)).length,
-    month: valid.filter((r) => inRange(r.o.createdAt, 24 * 30)).length,
-    revenueMonth: revenue(valid.filter((r) => inRange(r.o.createdAt, 24 * 30))),
-    avgTicket: valid.length ? Math.round(revenue(valid) / valid.length) : 0,
-    byTag: valid.reduce<Record<string, number>>((acc, r) => {
-      acc[r.o.operationalTag] = (acc[r.o.operationalTag] ?? 0) + 1;
-      return acc;
-    }, {}),
-    byDay: buildByDay14(valid.map((r) => r.o), now),
-  };
+  // Métricas: agregados SQL en ventanas UTC vía buildOrderMetrics — la misma
+  // fuente única que usa el dashboard (/admin). Ya no se cargan todos los
+  // pedidos en JS para contarlos; la respuesta mantiene su forma exacta
+  // (metrics.byDay = 14 buckets, byTag con las mismas claves).
+  const metrics = await buildOrderMetrics();
 
   return NextResponse.json({ orders: data, metrics, page, pageSize, total });
 }

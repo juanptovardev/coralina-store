@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Badge, Card, Drawer, Modal, PageHeader, Stat, Toast, useBusy, useJson } from "@/components/admin/ui";
+import { useEffect, useState } from "react";
+import { Badge, Card, Drawer, Modal, notify, PageHeader, Stat, Toast, useBusy, useJson, postJson } from "@/components/admin/ui";
 import { SHIPMENT_COLUMNS, formatCOP } from "@/lib/constants";
 
 type Trace = { status: string; at: string; by: string };
@@ -83,55 +83,42 @@ export default function EnviosPage() {
   const [dragging, setDragging] = useState<number | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [shakeCol, setShakeCol] = useState<string | null>(null);
-  const [toast, setToast] = useState("");
-  const [tone, setTone] = useState<"ok" | "error">("ok");
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [reactivateId, setReactivateId] = useState<number | null>(null);
   const { busy, run } = useBusy();
 
-  const reloadRef = useRef(reload);
-  useEffect(() => {
-    reloadRef.current = reload;
-  });
-
   useEffect(() => {
     if (data?.shipments) setCards(data.shipments);
   }, [data]);
 
-  // Poll 30 s + evento de refresco del resumen (badge del dashboard)
+  // Poll 30 s + evento de refresco del resumen (badge del dashboard).
+  // reload es estable (useCallback en useJson), así que [reload] no recrea el interval.
   useEffect(() => {
-    const t = setInterval(() => reloadRef.current(), 30000);
-    const onRefresh = () => reloadRef.current();
+    const t = setInterval(reload, 30000);
+    const onRefresh = () => reload();
     window.addEventListener("coralina:refresh-summary", onRefresh);
     return () => {
       clearInterval(t);
       window.removeEventListener("coralina:refresh-summary", onRefresh);
     };
-  }, []);
+  }, [reload]);
 
   async function move(shipmentId: number, status: string) {
     const card = cards.find((c) => c.id === shipmentId);
     if (!card || card.status === status) return;
     const prev = cards;
     setCards(cards.map((c) => (c.id === shipmentId ? { ...c, status } : c))); // optimista
-    const res = await fetch("/api/admin/shipments", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "move", shipmentId, status }),
-    });
-    const json = await res.json();
-    if (!res.ok || !json.ok) {
+    const { ok, error } = await postJson("/api/admin/shipments", { action: "move", shipmentId, status });
+    if (!ok) {
       setCards(prev); // rollback
       setShakeCol(status); // shake en la columna destino
       setTimeout(() => setShakeCol(null), 700);
-      setTone("error");
-      setToast(json.error ?? "No se pudo mover la tarjeta");
+      notify(error ?? "No se pudo mover la tarjeta", "error");
       return;
     }
-    setTone("ok");
-    setToast(`${card.displayId} → ${SHIPMENT_COLUMNS.find((c) => c.value === status)?.label ?? status}`);
-    reloadRef.current();
+    notify(`${card.displayId} → ${SHIPMENT_COLUMNS.find((c) => c.value === status)?.label ?? status}`);
+    reload();
     window.dispatchEvent(new Event("coralina:refresh-summary"));
   }
 
@@ -148,24 +135,15 @@ export default function EnviosPage() {
   const reactivateCard = reactivateId !== null ? cards.find((c) => c.id === reactivateId) ?? null : null;
 
   async function runArchiveJob() {
-    const res = await fetch("/api/admin/shipments", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "run_archive_job" }),
+    const { ok, error, json } = await postJson<{ archived?: number }>("/api/admin/shipments", {
+      action: "run_archive_job",
     });
-    const json = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      archived?: number;
-      error?: string;
-    };
-    if (!res.ok || !json.ok) {
-      setTone("error");
-      setToast(json.error ?? `No se pudo ejecutar el job de archivado (HTTP ${res.status})`);
+    if (!ok) {
+      notify(error ?? "No se pudo ejecutar el job de archivado", "error");
       return;
     }
-    setTone("ok");
-    setToast(`Job de archivado: ${json.archived} tarjeta(s) archivadas`);
-    reloadRef.current();
+    notify(`Job de archivado: ${json.archived} tarjeta(s) archivadas`);
+    reload();
   }
 
   return (
@@ -181,7 +159,7 @@ export default function EnviosPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <button className="dash-btn" onClick={() => reloadRef.current()}>
+            <button className="dash-btn" onClick={() => reload()}>
               ↻ Sincronizar
             </button>
             <button className="dash-btn" onClick={() => run(() => runArchiveJob())} disabled={busy}>
@@ -466,7 +444,7 @@ export default function EnviosPage() {
         </div>
       </Modal>
 
-      <Toast message={toast} tone={tone} />
+      <Toast />
     </div>
   );
 }
