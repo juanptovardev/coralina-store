@@ -98,16 +98,6 @@ export async function POST(req: Request) {
       })
       .where(eq(shipments.id, id));
 
-    // F3: orders.completed_at espeja el ciclo del paquete (misma semántica que
-    // shipment.completed_at): se estampa al entrar a Completado y se limpia si
-    // el envío regresa a una columna previa.
-    if (status === "completado" || ship.status === "completado") {
-      await db
-        .update(orders)
-        .set({ completedAt: status === "completado" ? new Date() : null })
-        .where(eq(orders.id, ship.orderId));
-    }
-
     await recordAudit({
       actor,
       module: "envios",

@@ -339,12 +339,15 @@ export async function transitionTag(
           operationalTag: tag,
           tagHistory: history,
           status: tag === "completado" ? "completed" : tag === "cancelado" ? "canceled" : "pending",
-          // Ciclo de vida (F3): cancelado estampa canceled_at (solo la primera
-          // vez; re-cancelar no lo pisa) y se limpia al salir del tag.
+          // Ciclo de vida (F3), con UN solo escritor: la capa comercial
+          // (tag/status). cancelado estampa canceled_at (solo la primera vez;
+          // re-cancelar no lo pisa) y lo limpia al salir del tag; completado
+          // estampa completed_at (y paid_at si aún no existe: los web ya lo
+          // traen desde createOrder). null limpia al dejar de estar completado;
+          // undefined omite la columna en el UPDATE (drizzle).
           canceledAt: willCancel ? (order.canceledAt ?? new Date()) : null,
-          // Completado estampa paid_at si aún no existe (los web ya lo traen
-          // desde createOrder). undefined = drizzle omite la columna.
           paidAt: tag === "completado" ? (order.paidAt ?? new Date()) : undefined,
+          completedAt: tag === "completado" ? (order.completedAt ?? new Date()) : null,
           updatedAt: new Date(),
         })
         .where(eq(orders.id, orderId));

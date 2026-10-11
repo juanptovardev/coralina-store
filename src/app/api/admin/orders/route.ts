@@ -60,7 +60,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Carrito inválido." }, { status: 400 });
     }
     const lines = await buildCartLines(norm.items);
-    return NextResponse.json(await evaluateCart(lines));
+    // ok:true explícito: postJson del panel exige ok para pintar los totales.
+    return NextResponse.json({ ok: true, ...(await evaluateCart(lines)) });
   }
 
   if (action === "create_manual") {
@@ -144,7 +145,10 @@ export async function POST(req: Request) {
     }
     const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
     if (!order) return NextResponse.json({ ok: false, error: "Pedido no encontrado." }, { status: 404 });
-    await db.update(orders).set({ notes: String(body.notes ?? "") }).where(eq(orders.id, id));
+    await db
+      .update(orders)
+      .set({ notes: String(body.notes ?? ""), updatedAt: new Date() })
+      .where(eq(orders.id, id));
     await recordAudit({
       actor,
       module: "pedidos",

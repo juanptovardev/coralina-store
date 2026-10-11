@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Badge,
   Card,
@@ -52,7 +52,7 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 export default function DisenoPage() {
-  const { data, loading, reload } = useJson<{
+  const { data, loading, reload, error } = useJson<{
     layouts: Layout[];
     tokens: Record<string, string>;
     defaults: Record<string, string>;
@@ -69,17 +69,39 @@ export default function DisenoPage() {
   const { busy, run } = useBusy();
 
   const layouts = data?.layouts ?? [];
+  // Tras guardar/resetear colores con éxito, el siguiente `data` re-siembra
+  // tokens desde el server (autoridad); los demás reload() no pisan ediciones.
+  const tokensReseedRef = useRef(false);
 
   useEffect(() => {
+    // Reload fallido: el server queda en estado desconocido → se conservan las
+    // ediciones locales y se descarta el flag (evita que un reload posterior
+    // exitoso consuma un re-seed vencido y pise los colores no guardados).
+    if (error) {
+      tokensReseedRef.current = false;
+      return;
+    }
     if (!data) return;
-    setTokens(data.tokens);
-    const target = layouts.find((l) => l.id === selectedId) ?? layouts.find((l) => l.status === "active") ?? layouts[0];
+    if (tokensReseedRef.current) {
+      tokensReseedRef.current = false;
+      setTokens(data.tokens);
+      return;
+    }
+    setTokens((prev) => (Object.keys(prev).length ? prev : data.tokens));
+  }, [data, error]);
+
+  // El draft se inicializa UNA sola vez (primer dato / sin selección): los
+  // reload() posteriores —guardar, publicar, colores— no descartan ediciones
+  // locales aún no guardadas.
+  useEffect(() => {
+    if (!data || selectedId !== null) return;
+    const target = layouts.find((l) => l.status === "active") ?? layouts[0];
     if (target) {
       setSelectedId(target.id);
       setDraft(normalizeLayout(JSON.parse(JSON.stringify(target))) as Layout);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, selectedId]);
 
   function pick(id: number) {
     const l = layouts.find((x) => x.id === id);
@@ -134,6 +156,12 @@ export default function DisenoPage() {
         title="Diseño del home"
         subtitle="Elige dónde va la modelo y el sistema coloca el texto donde no la tapa. Todo sobre una grilla de 12 columnas, con vista previa real antes de publicar."
       />
+
+      {error && data && (
+        <p className="mb-4 rounded-lg border border-[#b3261e]/35 bg-[#fdf0ee] p-2.5 text-[0.78rem] text-[var(--d-danger)]">
+          No se pudo sincronizar con el server; se conservan tus cambios locales.
+        </p>
+      )}
 
       {loading || !draft ? (
         <Skeleton rows={6} />
@@ -413,7 +441,13 @@ export default function DisenoPage() {
                   <button
                     className="dash-btn dash-btn-primary"
                     disabled={busy}
-                    onClick={() => run(() => post({ action: "save_tokens", tokens }))}
+                    onClick={() =>
+                      run(async () => {
+                        tokensReseedRef.current = true;
+                        const ok = await post({ action: "save_tokens", tokens }, "Colores guardados");
+                        if (!ok) tokensReseedRef.current = false;
+                      })
+                    }
                   >
                     Guardar colores
                   </button>
@@ -533,7 +567,13 @@ export default function DisenoPage() {
         title="Reset de colores a marca"
         message="Devuelve todos los colores a los valores de marca por defecto. Los personalizados se pierden. ¿Confirmas?"
         confirmLabel="Resetear"
-        onConfirm={() => run(() => post({ action: "reset_tokens" }))}
+        onConfirm={() =>
+          run(async () => {
+            tokensReseedRef.current = true;
+            const ok = await post({ action: "reset_tokens" }, "Colores restaurados a marca");
+            if (!ok) tokensReseedRef.current = false;
+          })
+        }
       />
 
       <Toast />

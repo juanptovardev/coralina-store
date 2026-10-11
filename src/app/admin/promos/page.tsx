@@ -124,9 +124,9 @@ export default function PromosPage() {
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         <div>
-      {loading ? (
-        <Skeleton rows={5} />
-      ) : promos.length === 0 ? (
+          {loading ? (
+            <Skeleton rows={5} />
+          ) : promos.length === 0 ? (
             <EmptyState
               title="Sin promociones"
               hint="Crea un % por categoría o un combo de dos piezas."
@@ -261,7 +261,7 @@ export default function PromosPage() {
           </div>
 
           <div className="space-y-3">
-            {(form.type === "category_percent" || form.type === "sku_percent") && (
+            {form.type === "category_percent" && (
               <div>
                 <label className="admin-label">Porcentaje</label>
                 <input
@@ -342,24 +342,26 @@ export default function PromosPage() {
             <button
               className="dash-btn dash-btn-primary w-full"
               disabled={busy}
-              onClick={async () => {
-                // minQty solo es editable para combo; para el resto debe nacer
-                // neutral (0) o el server exigiría unidades que el drawer no
-                // advertía antes del fix de minQty. El código se normaliza en
-                // la frontera (trim + upper) igual que en la API.
-                setCreateError("");
-                const res = await post({
-                  action: "create",
-                  ...form,
-                  minQty: form.type === "combo" ? form.minQty : 0,
-                  code: form.code.trim().toUpperCase(),
-                });
-                if (!res.ok) {
-                  setCreateError(res.error ?? "No se pudo crear la promoción.");
-                  return;
-                }
-                setCreating(false);
-              }}
+              onClick={() =>
+                run(async () => {
+                  // minQty solo es editable para combo; para el resto debe nacer
+                  // neutral (0) o el server exigiría unidades que el drawer no
+                  // advertía antes del fix de minQty. El código se normaliza en
+                  // la frontera (trim + upper) igual que en la API.
+                  setCreateError("");
+                  const res = await post({
+                    action: "create",
+                    ...form,
+                    minQty: form.type === "combo" ? form.minQty : 0,
+                    code: form.code.trim().toUpperCase(),
+                  });
+                  if (!res.ok) {
+                    setCreateError(res.error ?? "No se pudo crear la promoción.");
+                    return;
+                  }
+                  setCreating(false);
+                })
+              }
             >
               {busy ? "Creando…" : "Crear promoción"}
             </button>

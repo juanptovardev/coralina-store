@@ -167,7 +167,7 @@ export default function PedidosPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Hoy" value={String(metrics.today ?? 0)} hint="día natural UTC" />
+        <Stat label="Hoy" value={String(metrics.today ?? 0)} hint="Día UTC en curso" />
         <Stat label="Semana" value={String(metrics.week ?? 0)} />
         <Stat label="Mes" value={String(metrics.month ?? 0)} hint={formatCOP(metrics.revenueMonth ?? 0)} />
         <Stat label="Ticket promedio" value={formatCOP(metrics.avgTicket ?? 0)} />
@@ -185,7 +185,7 @@ export default function PedidosPage() {
             </div>
             <div className="mt-4 flex h-44 items-end gap-1.5">
               {(metrics.byDay ?? []).map((d) => {
-                const max = Math.max(1, ...((metrics.byDay ?? []).map((x) => x.count) || [1]));
+                const max = Math.max(1, ...((metrics.byDay ?? []).map((x) => x.count)));
                 const h = Math.max(3, Math.round((d.count / max) * 130));
                 return (
                   <div
@@ -504,11 +504,12 @@ export default function PedidosPage() {
                       title: "Cancelar pedido",
                       message:
                         "Cancelar el pedido devuelve el stock y archiva su envío. ¿Confirmas?",
-                      onOk: async () => {
-                        const err = await post({ action: "set_tag", orderId: open.id, tag: "cancelado" });
-                        notify(err ?? "Pedido cancelado y stock devuelto", err ? "error" : "ok");
-                        setOpen(null);
-                      },
+                      onOk: () =>
+                        void run(async () => {
+                          const err = await post({ action: "set_tag", orderId: open.id, tag: "cancelado" });
+                          notify(err ?? "Pedido cancelado y stock devuelto", err ? "error" : "ok");
+                          setOpen(null);
+                        }),
                     });
                   }}
                 >
@@ -543,9 +544,10 @@ export default function PedidosPage() {
                   if (value === open.notes) return;
                   const err = await post({ action: "save_notes", orderId: open.id, notes: value });
                   notify(err ?? "Notas guardadas", err ? "error" : "ok");
-                  // Actualiza el baseline: sin esto, el siguiente blur sin cambios
-                  // re-postea y genera auditoría fantasma.
-                  if (!err) setOpen({ ...open, notes: value });
+                  // Baseline + guard: si el drawer se cerró durante el await, no lo reabre.
+                  if (!err) {
+                    setOpen((prev) => (prev && prev.id === open.id ? { ...prev, notes: value } : prev));
+                  }
                 }}
               />
             </Card>
@@ -642,11 +644,19 @@ function ManualOrderModal({
     [products],
   );
 
+  // Éxito: { ok:true, ...totals }. Fallo: { ok:false, error } (HTTP 4xx) o
+  // error de red. Se pinta por shape; sin subtotal numérico se muestra `error`.
+  // seqRef evita pintar un total viejo fuera de orden.
+  const seqRef = useRef(0);
+  const [previewError, setPreviewError] = useState("");
   useEffect(() => {
     if (items.length === 0) {
+      seqRef.current++; // invalida respuestas en vuelo: la transición a vacío también ordena
       setTotals(null);
+      setPreviewError("");
       return;
     }
+    const seq = ++seqRef.current;
     void postJson<{
       subtotalCents?: number;
       discountCents?: number;
@@ -655,17 +665,20 @@ function ManualOrderModal({
     }>("/api/admin/orders", {
       action: "preview_totals",
       items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
-    }).then(({ ok, json }) => {
-      setTotals(
-        ok && typeof json.subtotalCents === "number"
-          ? {
-              subtotalCents: json.subtotalCents,
-              discountCents: json.discountCents ?? 0,
-              totalCents: json.totalCents ?? 0,
-              applied: json.applied ?? [],
-            }
-          : null,
-      );
+    }).then(({ error, json }) => {
+      if (seq !== seqRef.current) return;
+      if (typeof json.subtotalCents === "number") {
+        setTotals({
+          subtotalCents: json.subtotalCents,
+          discountCents: json.discountCents ?? 0,
+          totalCents: json.totalCents ?? 0,
+          applied: json.applied ?? [],
+        });
+        setPreviewError("");
+      } else {
+        setTotals(null);
+        setPreviewError(error ?? "No se pudo calcular el total.");
+      }
     });
   }, [items]);
 
@@ -770,6 +783,9 @@ function ManualOrderModal({
               ))}
               <Row label="Total" value={formatCOP(totals.totalCents)} bold />
             </div>
+          )}
+          {!totals && previewError && (
+            <p className="text-xs text-[var(--d-danger)]">{previewError}</p>
           )}
 
           {error && <p className="text-xs text-[var(--d-danger)]">{error}</p>}
