@@ -8,6 +8,15 @@ import { getCatalog } from "../src/components/store/shell";
 import { evaluatePromos } from "../src/lib/domain";
 import pg from "pg";
 
+// Guard: esta suite ESCRIBE fixtures en la DB que lee el server :3006. Si
+// DATABASE_URL apunta a otra DB (p.ej. .env.local con Neon), el drawer vería
+// fixtures que el server nunca ve → falsos FAIL y escrituras en producción.
+if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.includes("127.0.0.1")) {
+  console.error("[parity-drawer] DATABASE_URL debe apuntar a la DB LOCAL que usa el server :3006:");
+  console.error("  DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/coralina_v6 bun qa/parity-drawer.ts");
+  process.exit(1);
+}
+
 const BASE = "http://localhost:3006";
 const { catalog, promos } = await getCatalog();
 
