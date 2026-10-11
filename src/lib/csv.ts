@@ -1,12 +1,12 @@
 /**
  * Escape CSV compartido (panel + exportes de API).
- * Anti CSV-inyección: celdas que empiezan con = + - @ reciben prefijo '
- * (Excel/Sheets las tratarían como fórmula). Siempre entrecomillado y
- * comillas internas duplicadas.
+ * Anti CSV-inyección: celdas que empiezan con = + - @ (y TAB/CR, que algunos
+ * parsers tratan como fórmula) reciben prefijo ' (Excel/Sheets las tratarían
+ * como fórmula). Siempre entrecomillado y comillas internas duplicadas.
  */
 export function csvCell(value: string | number): string {
   const s = String(value);
-  const guarded = /^[=+@-]/.test(s) ? `'${s}` : s;
+  const guarded = /^[\t\r=+@-]/.test(s) ? `'${s}` : s;
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 

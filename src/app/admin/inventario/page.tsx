@@ -123,7 +123,26 @@ export default function InventarioPage() {
                 </span>
                 <span className="flex items-center gap-2">
                   <Badge tone={l.stocked === 0 ? "red" : "amber"}>{l.stocked} uds</Badge>
-                  <a className="dash-btn px-2.5 py-0.5 text-[0.7rem]" href={`#inv-${l.variantId}`}>
+                  <a
+                    className="dash-btn px-2.5 py-0.5 text-[0.7rem]"
+                    href={`#inv-${l.variantId}`}
+                    onClick={(e) => {
+                      // Si hay filtros activos la fila puede no estar renderizada:
+                      // se limpian y se hace scroll explícito (la ancla nativa
+                      // no resolvería contra una tabla que aún no muestra la fila).
+                      if (!category && !dq) return;
+                      e.preventDefault();
+                      setCategory(null);
+                      setQ("");
+                      setTimeout(
+                        () =>
+                          document
+                            .getElementById(`inv-${l.variantId}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+                        50,
+                      );
+                    }}
+                  >
                     Editar stock
                   </a>
                 </span>

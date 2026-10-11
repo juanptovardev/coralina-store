@@ -7,6 +7,7 @@ import { categories, homeLayouts, products } from "@/db/schema";
 import { getActor, ForbiddenError, type Actor } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
 import { sniffImageType, type SniffedImageType } from "@/lib/image-sniff";
+import { collectUploadNames } from "@/lib/upload-scan";
 
 /**
  * Sistema de gestión de imágenes del servidor.
@@ -35,21 +36,7 @@ const EXT_BY_TYPE: Record<SniffedImageType, string> = {
 
 // GC de huérfanas (F5): se escanea TODO lo que puede referenciar imágenes —
 // products.images (jsonb), categories.imageUrl y homeLayouts (banner/widgets/
-// sections, con URLs anidadas en props) — serializando a texto y extrayendo
-// cada /uploads/products/<nombre>. Nada queda por fuera del diff.
-const UPLOAD_URL_RE = /\/uploads\/products\/([^"'\s\\/]+)/g;
-
-function collectReferenced(value: unknown, into: Set<string>) {
-  if (typeof value === "string") {
-    for (const m of value.matchAll(UPLOAD_URL_RE)) {
-      into.add(decodeURIComponent(m[1]));
-    }
-  } else if (Array.isArray(value)) {
-    for (const v of value) collectReferenced(v, into);
-  } else if (value && typeof value === "object") {
-    for (const v of Object.values(value)) collectReferenced(v, into);
-  }
-}
+// sections, con URLs anidadas en props) — via collectUploadNames (lib/upload-scan).
 
 /** GET ?orphans=1 → archivos en UPLOAD_DIR que ninguna referencia usa. */
 export async function GET(req: Request) {
@@ -77,16 +64,16 @@ export async function GET(req: Request) {
 
   const referenced = new Set<string>();
   const prodRows = await db.select({ images: products.images }).from(products);
-  for (const r of prodRows) collectReferenced(r.images, referenced);
+  for (const r of prodRows) collectUploadNames(r.images, referenced);
   const catRows = await db.select({ imageUrl: categories.imageUrl }).from(categories);
-  for (const r of catRows) collectReferenced(r.imageUrl, referenced);
+  for (const r of catRows) collectUploadNames(r.imageUrl, referenced);
   const layoutRows = await db
     .select({ banner: homeLayouts.banner, widgets: homeLayouts.widgets, sections: homeLayouts.sections })
     .from(homeLayouts);
   for (const l of layoutRows) {
-    collectReferenced(l.banner, referenced);
-    collectReferenced(l.widgets, referenced);
-    collectReferenced(l.sections, referenced);
+    collectUploadNames(l.banner, referenced);
+    collectUploadNames(l.widgets, referenced);
+    collectUploadNames(l.sections, referenced);
   }
 
   const orphans = files

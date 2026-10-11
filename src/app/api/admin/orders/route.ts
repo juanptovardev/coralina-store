@@ -10,7 +10,7 @@ import { buildOrderMetrics } from "@/lib/metrics";
 import { evaluateCart } from "@/lib/promo";
 import { pageParams } from "@/lib/page-params";
 import { csvResponse, toCsv } from "@/lib/csv";
-import { getActor } from "@/lib/session";
+import { getActor, ForbiddenError, type Actor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 import { normalizeCartItems } from "@/lib/cart-input";
 
@@ -21,7 +21,15 @@ export async function GET(req: Request) {
   // Export CSV completo (F5): sin paginación, mismas filas que el listado.
   // La columna "notas" solo sale para admin (dato interno del pedido).
   if (searchParams.get("format") === "csv") {
-    const actor = await getActor();
+    // getActor es fail-closed: sin sesión válida → 401 explícito (mismo patrón
+    // que uploads). El middleware ya deniega por defecto; esto es defensa extra.
+    let actor: Actor;
+    try {
+      actor = await getActor();
+    } catch (e) {
+      if (!(e instanceof ForbiddenError)) throw e;
+      return NextResponse.json({ ok: false, error: "Sesión requerida." }, { status: 401 });
+    }
     const rows = await db
       .select({ o: orders, c: customers })
       .from(orders)
@@ -298,11 +306,12 @@ export async function POST(req: Request) {
     // transacción. Si algo falla no queda stock repuesto con el pedido vivo
     // (un reintento no repone de nuevo). El audit se escribe tras el commit.
     await db.transaction(async (tx) => {
-      // Reponer stock si el pedido NO estaba cancelado: al crearse descontó stock
-      // (un cancelado ya lo repuso una sola vez vía transitionTag).
-      // Contrato: solo pedidos creados vía createOrder; los del seed se insertan
-      // directo en SQL y no descontaron stock (no se debe inflar inventario).
-      if (order.status !== "canceled") {
+      // Reponer stock si el pedido NO estaba cancelado NI devuelto (F5): al
+      // crearse descontó stock; un cancelado ya lo repuso vía transitionTag y
+      // un devuelto lo repuso en la acción "devolucion". Doble reposición =
+      // inflación silenciosa de inventario. Contrato: solo pedidos creados vía
+      // createOrder descontaron (los del seed se insertan directo en SQL).
+      if (order.status !== "canceled" && !order.returnedAt) {
         const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
         for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
       }

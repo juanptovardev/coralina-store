@@ -521,12 +521,19 @@ export default function PedidosPage() {
                   onClick={() => {
                     setConfirmBox({
                       title: "Cancelar pedido",
-                      message:
-                        "Cancelar el pedido devuelve el stock y archiva su envío. ¿Confirmas?",
+                      message: open.returnedAt
+                        ? "Cancelar el pedido archiva su envío (el stock ya fue devuelto en la devolución). ¿Confirmas?"
+                        : "Cancelar el pedido devuelve el stock y archiva su envío. ¿Confirmas?",
                       onOk: () =>
                         void run(async () => {
                           const err = await post({ action: "set_tag", orderId: open.id, tag: "cancelado" });
-                          notify(err ?? "Pedido cancelado y stock devuelto", err ? "error" : "ok");
+                          notify(
+                            err ??
+                              (open.returnedAt
+                                ? "Pedido cancelado (el stock ya fue devuelto)"
+                                : "Pedido cancelado y stock devuelto"),
+                            err ? "error" : "ok",
+                          );
                           setOpen(null);
                         }),
                     });

@@ -98,8 +98,8 @@ export async function GET(req: Request) {
     .having(havingClauses.length ? sql.join(havingClauses, sql` and `) : sql`true`);
 
   // Export CSV completo (F5): sin paginación, respeta búsqueda y segmento.
+  // El gate de rol vive en el middleware (deny-by-default en /api/admin/*).
   if (searchParams.get("format") === "csv") {
-    await getActor(); // fail-closed: middleware ya filtra, re-verificamos sesión
     const rows = await db
       .select({
         name: customers.name,

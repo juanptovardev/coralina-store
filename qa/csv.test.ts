@@ -25,6 +25,8 @@ ok("prefijo = recibe guardia", csvCell("=SUM(A1)") === `"'=SUM(A1)"`);
 ok("prefijo + recibe guardia", csvCell("+573001112233") === `"'+573001112233"`);
 ok("prefijo - recibe guardia", csvCell("-5") === `"'-5"`);
 ok("prefijo @ recibe guardia", csvCell("@import") === `"'@import"`);
+ok("TAB inicial recibe guardia", csvCell("\tcmd") === `"'\tcmd"`);
+ok("CR inicial recibe guardia", csvCell("\rcmd") === `"'\rcmd"`);
 ok("texto normal sin guardia", csvCell("María José") === '"María José"');
 
 console.log("csv (toCsv)");

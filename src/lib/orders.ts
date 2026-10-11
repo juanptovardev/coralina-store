@@ -352,8 +352,10 @@ export async function transitionTag(
         })
         .where(eq(orders.id, orderId));
 
-      if (willCancel && !wasCanceled) {
-        // Primera cancelación: se devuelve el stock UNA sola vez y se archiva el envío.
+      // Primera cancelación: se devuelve el stock UNA sola vez y se archiva el
+      // envío. Si el pedido ya fue devuelto (F5), el stock ya se repuso en la
+      // devolución: reponer de nuevo inflaría el inventario.
+      if (willCancel && !wasCanceled && !order.returnedAt) {
         const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, orderId));
         for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
         await tx
