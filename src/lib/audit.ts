@@ -16,7 +16,10 @@ export type AuditInput = {
     | "publish"
     | "purge_audit"
     | "login"
-    | "logout";
+    | "logout"
+    | "devolucion"
+    | "set_tracking"
+    | "purge_orphans";
   fieldChanged?: string;
   oldValue?: unknown;
   newValue?: unknown;

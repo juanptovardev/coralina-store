@@ -50,6 +50,40 @@ export default function ProductosPage() {
   const { busy, run } = useBusy();
   const dFilter = useDebouncedValue(filter, 300);
 
+  // GC de imágenes huérfanas (F5): buscar → listar (máx 20) → purgar.
+  const [orphans, setOrphans] = useState<string[] | null>(null);
+  const [orphanError, setOrphanError] = useState("");
+
+  async function scanOrphans() {
+    setOrphans(null);
+    setOrphanError("");
+    try {
+      const res = await fetch("/api/admin/uploads?orphans=1");
+      const json = (await res.json().catch(() => ({}))) as { orphans?: string[]; error?: string };
+      if (!res.ok) {
+        setOrphanError(json.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setOrphans(json.orphans ?? []);
+    } catch {
+      setOrphanError("Error de red.");
+    }
+  }
+
+  async function purgeOrphans() {
+    if (!orphans || orphans.length === 0) return;
+    const { ok, error, json } = await postJson<{ deleted?: number }>("/api/admin/uploads", {
+      action: "purge_orphans",
+      urls: orphans,
+    });
+    if (!ok) {
+      notify(error ?? "No se pudieron eliminar las imágenes", "error");
+      return;
+    }
+    notify(`${json.deleted ?? 0} imagen(es) huérfana(s) eliminada(s)`);
+    setOrphans(null);
+  }
+
   const products = (data?.products ?? []).filter((p) =>
     p.title.toLowerCase().includes(dFilter.toLowerCase()),
   );
@@ -213,6 +247,47 @@ export default function ProductosPage() {
           </table>
         </div>
       )}
+
+      {/* GC de imágenes huérfanas (F5) */}
+      <Card className="mt-6">
+        <p className="admin-label">Imágenes huérfanas</p>
+        <p className="mt-1 text-[0.72rem] opacity-60">
+          Archivos en /uploads/products que ya no usa ningún producto, categoría ni diseño del Home.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button className="dash-btn" disabled={busy} onClick={() => run(() => scanOrphans())}>
+            {busy && orphans === null && !orphanError ? "Buscando…" : "Buscar imágenes huérfanas"}
+          </button>
+          {orphans && orphans.length > 0 && (
+            <button
+              className="dash-btn dash-btn-danger"
+              disabled={busy}
+              onClick={() =>
+                setConfirmBox({
+                  title: "Eliminar imágenes huérfanas",
+                  message: `Se eliminarán ${orphans.length} archivo(s) del servidor. Esta acción no se puede deshacer.`,
+                  confirmLabel: `Eliminar (${orphans.length})`,
+                  onOk: () => void run(() => purgeOrphans()),
+                })
+              }
+            >
+              Eliminar ({orphans.length})
+            </button>
+          )}
+        </div>
+        {orphanError && <p className="mt-2 text-xs text-[var(--d-danger)]">{orphanError}</p>}
+        {orphans && orphans.length === 0 && (
+          <p className="mt-2 text-xs opacity-60">No hay imágenes huérfanas. Todo limpio.</p>
+        )}
+        {orphans && orphans.length > 0 && (
+          <ul className="mt-3 space-y-1 font-mono text-[0.72rem] opacity-80">
+            {orphans.slice(0, 20).map((u) => (
+              <li key={u}>· {u}</li>
+            ))}
+            {orphans.length > 20 && <li>… y {orphans.length - 20} más</li>}
+          </ul>
+        )}
+      </Card>
 
       <Modal
         open={wizard}

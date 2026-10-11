@@ -265,13 +265,8 @@ export async function postJson<T = Record<string, unknown>>(
   }
 }
 
-/** Celda CSV segura: entrecomillada, comillas internas duplicadas y prefijo '
- *  en celdas que empiezan con = + - @ (guardia de inyección de fórmulas). */
-export function csvCell(value: string | number): string {
-  const s = String(value);
-  const guarded = /^[=+@-]/.test(s) ? `'${s}` : s;
-  return `"${guarded.replace(/"/g, '""')}"`;
-}
+/** Celda CSV segura: implementación compartida con las rutas de export (lib/csv). */
+export { csvCell } from "@/lib/csv";
 
 /** Confirmación propia (reemplaza confirm() nativo) para acciones destructivas suaves. */
 export function ConfirmDialog({

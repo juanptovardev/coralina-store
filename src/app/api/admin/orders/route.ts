@@ -9,6 +9,7 @@ import { transitionTag, createOrder, buildCartLines, restoreStock } from "@/lib/
 import { buildOrderMetrics } from "@/lib/metrics";
 import { evaluateCart } from "@/lib/promo";
 import { pageParams } from "@/lib/page-params";
+import { csvResponse, toCsv } from "@/lib/csv";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 import { normalizeCartItems } from "@/lib/cart-input";
@@ -16,6 +17,57 @@ import { normalizeCartItems } from "@/lib/cart-input";
 export async function GET(req: Request) {
   await ensureSeeded();
   const { searchParams } = new URL(req.url);
+
+  // Export CSV completo (F5): sin paginación, mismas filas que el listado.
+  // La columna "notas" solo sale para admin (dato interno del pedido).
+  if (searchParams.get("format") === "csv") {
+    const actor = await getActor();
+    const rows = await db
+      .select({ o: orders, c: customers })
+      .from(orders)
+      .innerJoin(customers, eq(customers.id, orders.customerId))
+      .orderBy(desc(orders.createdAt), desc(orders.id));
+    const includeNotes = actor.role === "admin";
+    const header = [
+      "id",
+      "display_id",
+      "fecha",
+      "cliente",
+      "email",
+      "telefono",
+      "ciudad",
+      "estado_equipo",
+      "status",
+      "subtotal_cents",
+      "descuento_cents",
+      "total_cents",
+      "promo",
+      ...(includeNotes ? ["notas"] : []),
+    ];
+    const csv = toCsv(
+      header,
+      rows.map(({ o, c }) => {
+        const base = [
+          o.id,
+          o.displayId,
+          o.createdAt.toISOString(),
+          c.name,
+          c.email,
+          c.phone,
+          c.city,
+          o.operationalTag,
+          o.status,
+          o.subtotalCents,
+          o.discountCents,
+          o.totalCents,
+          (o.discountBreakdown ?? []).map((d) => d.label).join(" | "),
+        ];
+        return includeNotes ? [...base, o.notes] : base;
+      }),
+    );
+    return csvResponse("coralina-pedidos.csv", csv);
+  }
+
   const { page, pageSize, offset } = pageParams(searchParams, 100);
 
   // Métricas se calculan sobre TODOS los pedidos (semántica intacta); la
@@ -159,6 +211,69 @@ export async function POST(req: Request) {
       oldValue: order.notes,
       newValue: body.notes,
       summary: `${actor.name} actualizó las notas internas del pedido ${order.displayId}.`,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "devolucion") {
+    const id = Number(body.orderId);
+    if (!Number.isInteger(id)) {
+      return NextResponse.json({ ok: false, error: "Pedido inválido." }, { status: 400 });
+    }
+    // Falla de guardia dentro de la tx: sale como excepción para forzar rollback.
+    class DevolucionRejected extends Error {
+      constructor(readonly status: number, readonly error: string) {
+        super(error);
+      }
+    }
+    let displayId = "";
+    try {
+      await db.transaction(async (tx) => {
+        // FOR UPDATE: dos devoluciones concurrentes sobre la misma fila se
+        // serializan — la segunda ve returned_at estampado y sale en 409.
+        const [order] = await tx
+          .select()
+          .from(orders)
+          .where(eq(orders.id, id))
+          .limit(1)
+          .for("update");
+        if (!order) {
+          throw new DevolucionRejected(404, "Pedido no encontrado.");
+        }
+        displayId = order.displayId;
+        if (order.operationalTag !== "completado") {
+          throw new DevolucionRejected(
+            409,
+            "Solo se puede registrar la devolución de un pedido completado.",
+          );
+        }
+        if (order.returnedAt) {
+          throw new DevolucionRejected(409, "El pedido ya fue devuelto.");
+        }
+        // Mismas semantics que hard_delete/cancel: reponer el stock de cada
+        // ítem (contrato: solo pedidos creados vía createOrder descontaron).
+        const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
+        for (const it of items) await restoreStock(it.variantId, it.quantity, tx);
+        await tx
+          .update(orders)
+          .set({ returnedAt: new Date(), updatedAt: new Date() })
+          .where(eq(orders.id, id));
+      });
+    } catch (e) {
+      if (e instanceof DevolucionRejected) {
+        return NextResponse.json({ ok: false, error: e.error }, { status: e.status });
+      }
+      throw e;
+    }
+    // Auditoría tras el commit (mismo criterio que hard_delete).
+    await recordAudit({
+      actor,
+      module: "pedidos",
+      entityType: "order",
+      entityId: displayId,
+      action: "devolucion",
+      newValue: { returnedAt: new Date().toISOString() },
+      summary: `${actor.name} registró la devolución del pedido ${displayId} (stock de todas las piezas repuesto).`,
     });
     return NextResponse.json({ ok: true });
   }

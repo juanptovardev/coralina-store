@@ -21,6 +21,8 @@ type ShipmentCard = {
   archivedAt?: string | null;
   statusHistory?: Trace[];
   orderStatus?: string;
+  carrier?: string;
+  trackingCode?: string;
 };
 
 const COL_COLOR: Record<string, string> = {
@@ -391,6 +393,14 @@ export default function EnviosPage() {
               <p className="admin-label mb-2">Trayectoria</p>
               <Trace hist={openCard.statusHistory} />
             </div>
+            <TrackingForm
+              key={openCard.id}
+              card={openCard}
+              onSaved={() => {
+                reload();
+                window.dispatchEvent(new Event("coralina:refresh-summary"));
+              }}
+            />
             <div>
               <p className="admin-label mb-2">Mover a</p>
               <div className="flex flex-wrap gap-2">
@@ -445,6 +455,57 @@ export default function EnviosPage() {
       </Modal>
 
       <Toast />
+    </div>
+  );
+}
+
+/** Transportadora + guía (F5): inputs con tope de 80 y guard de doble submit. */
+function TrackingForm({ card, onSaved }: { card: ShipmentCard; onSaved: () => void }) {
+  const [carrier, setCarrier] = useState(card.carrier ?? "");
+  const [tracking, setTracking] = useState(card.trackingCode ?? "");
+  const { busy, run } = useBusy();
+
+  return (
+    <div>
+      <p className="admin-label mb-2">Transportadora y guía</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="dash-input max-w-[11rem]"
+          placeholder="Transportadora (ej. Servientrega)"
+          maxLength={80}
+          value={carrier}
+          onChange={(e) => setCarrier(e.target.value)}
+        />
+        <input
+          className="dash-input max-w-[13rem]"
+          placeholder="Número de guía"
+          maxLength={80}
+          value={tracking}
+          onChange={(e) => setTracking(e.target.value)}
+        />
+        <button
+          className="dash-btn dash-btn-primary"
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              const { ok, error } = await postJson("/api/admin/shipments", {
+                action: "set_tracking",
+                shipmentId: card.id,
+                carrier,
+                trackingNumber: tracking,
+              });
+              if (!ok) {
+                notify(error ?? "No se pudo guardar el tracking", "error");
+                return;
+              }
+              notify("Transportadora y guía guardadas");
+              onSaved();
+            })
+          }
+        >
+          {busy ? "Guardando…" : "Guardar"}
+        </button>
+      </div>
     </div>
   );
 }

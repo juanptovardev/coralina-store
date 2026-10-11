@@ -39,6 +39,8 @@ export async function GET(req: Request) {
     completedAt: s.completedAt,
     archivedAt: s.archivedAt,
     createdAt: s.createdAt,
+    carrier: s.carrier,
+    trackingCode: s.trackingCode,
     displayId: o.displayId,
     operationalTag: o.operationalTag,
     orderStatus: o.status,
@@ -108,6 +110,49 @@ export async function POST(req: Request) {
       oldValue: ship.status,
       newValue: status,
       summary: `${actor.name} movió el envío de ${order?.displayId ?? `#${id}`} de ${ship.status} a ${status}.`,
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "set_tracking") {
+    const id = Number(body.shipmentId);
+    if (!Number.isInteger(id)) {
+      return NextResponse.json({ ok: false, error: "Envío inválido." }, { status: 400 });
+    }
+    const carrier = String(body.carrier ?? "").trim();
+    const trackingCode = String(body.trackingNumber ?? "").trim();
+    if (carrier.length > 80) {
+      return NextResponse.json(
+        { ok: false, error: "La transportadora no puede superar 80 caracteres." },
+        { status: 400 },
+      );
+    }
+    if (trackingCode.length > 80) {
+      return NextResponse.json(
+        { ok: false, error: "El número de guía no puede superar 80 caracteres." },
+        { status: 400 },
+      );
+    }
+    const [ship] = await db.select().from(shipments).where(eq(shipments.id, id)).limit(1);
+    if (!ship) return NextResponse.json({ ok: false, error: "Envío no encontrado." }, { status: 404 });
+
+    // Escritura de una sola tabla: el UPDATE es atómico; no requiere transacción.
+    await db
+      .update(shipments)
+      .set({ carrier, trackingCode })
+      .where(eq(shipments.id, id));
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, ship.orderId)).limit(1);
+    await recordAudit({
+      actor,
+      module: "envios",
+      entityType: "shipment",
+      entityId: order?.displayId ?? id,
+      action: "set_tracking",
+      fieldChanged: "carrier,tracking_code",
+      oldValue: { carrier: ship.carrier, trackingCode: ship.trackingCode },
+      newValue: { carrier, trackingCode },
+      summary: `${actor.name} guardó transportadora/guía del envío de ${order?.displayId ?? `#${id}`}.`,
     });
     return NextResponse.json({ ok: true });
   }

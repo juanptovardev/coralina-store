@@ -140,6 +140,9 @@ export const orders = pgTable(
   paidAt: timestamp("paid_at", { withTimezone: true }),
   canceledAt: timestamp("canceled_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  // Devolución/reembolso (F5): estampado por la acción "devolucion" del panel;
+  // null = sin devolver. Migración aditiva idempotente (_f5-migrate.mjs).
+  returnedAt: timestamp("returned_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }),
   },

@@ -92,6 +92,11 @@ export default function ClientesPage() {
       <PageHeader
         title="Clientes"
         subtitle="Paginación en servidor (50 por página), búsqueda con retardo y segmentos: VIP ≥ $50.000, recurrentes ≥ 2 pedidos, sin compras."
+        actions={
+          <a className="dash-btn" href="/api/admin/customers?format=csv">
+            Exportar CSV
+          </a>
+        }
       />
 
       {/* Stats globales (sin filtros) */}

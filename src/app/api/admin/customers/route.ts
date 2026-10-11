@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { customers, orderItems, orders } from "@/db/schema";
 import { asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { recordAudit } from "@/lib/audit";
+import { csvResponse, toCsv } from "@/lib/csv";
 import { getActor } from "@/lib/session";
 import { ensureSeeded } from "@/lib/seed";
 
@@ -95,6 +96,31 @@ export async function GET(req: Request) {
     .where(where)
     .groupBy(customers.id)
     .having(havingClauses.length ? sql.join(havingClauses, sql` and `) : sql`true`);
+
+  // Export CSV completo (F5): sin paginación, respeta búsqueda y segmento.
+  if (searchParams.get("format") === "csv") {
+    await getActor(); // fail-closed: middleware ya filtra, re-verificamos sesión
+    const rows = await db
+      .select({
+        name: customers.name,
+        email: customers.email,
+        phone: customers.phone,
+        city: customers.city,
+        orderCount: sql<number>`count(${orders.id})::int`,
+        ltvCents: ltvExpr,
+      })
+      .from(customers)
+      .leftJoin(orders, eq(orders.customerId, customers.id))
+      .where(where)
+      .groupBy(customers.id)
+      .having(havingClauses.length ? sql.join(havingClauses, sql` and `) : sql`true`)
+      .orderBy(asc(customers.name));
+    const csv = toCsv(
+      ["nombre", "email", "telefono", "ciudad", "pedidos", "ltv_cents"],
+      rows.map((r) => [r.name, r.email, r.phone, r.city, r.orderCount, Math.round(r.ltvCents)]),
+    );
+    return csvResponse("coralina-clientes.csv", csv);
+  }
 
   const rows = await base
     .orderBy(sort === "ltv" ? desc(sql`coalesce(sum(case when ${orders.status} <> 'canceled' then ${orders.totalCents} else 0 end),0)`) : asc(customers.name))

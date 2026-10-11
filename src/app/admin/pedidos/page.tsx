@@ -36,6 +36,7 @@ type OrderRow = {
   discountBreakdown: { label: string; amountCents: number }[];
   paymentRef: string;
   notes: string;
+  returnedAt: string | null;
   tagHistory: { tag: string; at: string; by: string }[];
   createdAt: string;
   customer: { id: number; name: string; email: string; phone: string; city: string; address: string };
@@ -126,6 +127,20 @@ export default function PedidosPage() {
     return null;
   }
 
+  // Devolución (F5): repone el stock de todas las piezas y estampa returned_at.
+  // Tras el éxito actualizamos el snapshot del drawer (badge + botón deshabilitado).
+  async function registerReturn(order: OrderRow) {
+    const err = await post({ action: "devolucion", orderId: order.id });
+    if (err) {
+      notify(err, "error");
+      return;
+    }
+    notify(`Devolución registrada · stock restaurado (${order.displayId})`);
+    setOpen((prev) =>
+      prev && prev.id === order.id ? { ...prev, returnedAt: new Date().toISOString() } : prev,
+    );
+  }
+
   async function bulkApply(tag: string) {
     const { ok, error, json } = await postJson<{
       changed?: number;
@@ -162,6 +177,9 @@ export default function PedidosPage() {
             <button className="dash-btn dash-btn-primary" onClick={() => setManual(true)}>
               + Pedido manual
             </button>
+            <a className="dash-btn" href="/api/admin/orders?format=csv">
+              Exportar CSV
+            </a>
           </>
         }
       />
@@ -434,6 +452,7 @@ export default function PedidosPage() {
                 Clase: {open.fulfillmentClass}
               </Badge>
               {open.shipment && <Badge tone="blue">Paquete: {open.shipment.status}</Badge>}
+              {open.returnedAt && <Badge tone="amber">devuelto</Badge>}
             </div>
 
             <Card>
@@ -517,6 +536,33 @@ export default function PedidosPage() {
                 </button>
               </div>
             </Card>
+
+            {open.operationalTag === "completado" && (
+              <Card>
+                <p className="admin-label">Devolución</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  {open.returnedAt ? (
+                    <Badge tone="amber" dot>
+                      devuelto
+                    </Badge>
+                  ) : null}
+                  <button
+                    className="dash-btn"
+                    disabled={busy || Boolean(open.returnedAt)}
+                    onClick={() =>
+                      setConfirmBox({
+                        title: "Registrar devolución",
+                        message:
+                          "Se registra la devolución/reembolso del pedido y se restaura el stock de todas las piezas. ¿Confirmas?",
+                        onOk: () => void run(() => registerReturn(open)),
+                      })
+                    }
+                  >
+                    Registrar devolución
+                  </button>
+                </div>
+              </Card>
+            )}
 
             <Card>
               <p className="admin-label">Historial</p>

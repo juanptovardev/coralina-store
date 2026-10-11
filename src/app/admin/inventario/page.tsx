@@ -46,6 +46,9 @@ const LEVEL_TONE: Record<string, "green" | "amber" | "red" | "blue"> = {
   out: "red",
 };
 
+/** Umbral de la alerta de stock bajo (F5): variantes con stock <= 3. */
+const LOW_STOCK_THRESHOLD = 3;
+
 export default function InventarioPage() {
   const { data, loading, reload } = useJson<{ summary: Summary[]; levels: Level[] }>("/api/admin/inventory");
   const [category, setCategory] = useState<number | null>(null);
@@ -57,6 +60,12 @@ export default function InventarioPage() {
     if (dq && !`${l.productTitle} ${l.sku}`.toLowerCase().includes(dq.toLowerCase())) return false;
     return true;
   });
+
+  // Alerta de stock bajo (F5): sobre TODAS las variantes (ignora filtros de la
+  // tabla), incluye agotadas (stock 0) — son las más urgentes.
+  const lowStock = (data?.levels ?? [])
+    .filter((l) => l.stocked <= LOW_STOCK_THRESHOLD)
+    .sort((a, b) => a.stocked - b.stocked);
 
   async function update(body: Record<string, unknown>) {
     const { ok, error } = await postJson("/api/admin/catalog", body);
@@ -83,11 +92,46 @@ export default function InventarioPage() {
         title="Inventario"
         subtitle="Una bodega. El stock se descuenta al confirmar el pedido y se devuelve si se cancela. Las ediciones aquí quedan auditadas y bloquean cambios simultáneos."
         actions={
-          <button className="dash-btn" onClick={exportCsv}>
-            Exportar CSV
-          </button>
+          <>
+            {lowStock.length > 0 && (
+              <Badge tone="red" dot title={`Variantes con stock ≤ ${LOW_STOCK_THRESHOLD}`}>
+                stock bajo: {lowStock.length}
+              </Badge>
+            )}
+            <button className="dash-btn" onClick={exportCsv}>
+              Exportar CSV
+            </button>
+          </>
         }
       />
+
+      {/* Alertas de stock bajo (F5): ancla #inv-<variantId> lleva a la fila editable */}
+      {lowStock.length > 0 && (
+        <div
+          className="dash-panel mb-4 border border-[#b3261e]/30 bg-[#fde8e6]/40 p-4"
+          role="alert"
+        >
+          <p className="text-[0.8rem] font-semibold text-[var(--d-danger)]">
+            Alertas de stock bajo · {lowStock.length} variante(s) con ≤ {LOW_STOCK_THRESHOLD} unidades
+          </p>
+          <ul className="mt-2 space-y-1.5 text-xs">
+            {lowStock.map((l) => (
+              <li key={l.variantId} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  {l.productTitle} · talla {l.size} ·{" "}
+                  <span className="font-mono opacity-70">{l.sku}</span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <Badge tone={l.stocked === 0 ? "red" : "amber"}>{l.stocked} uds</Badge>
+                  <a className="dash-btn px-2.5 py-0.5 text-[0.7rem]" href={`#inv-${l.variantId}`}>
+                    Editar stock
+                  </a>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {loading ? (
         <Skeleton rows={6} />
@@ -166,7 +210,7 @@ export default function InventarioPage() {
               </thead>
               <tbody>
                 {levels.map((l) => (
-                  <tr key={l.variantId}>
+                  <tr key={l.variantId} id={`inv-${l.variantId}`}>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
