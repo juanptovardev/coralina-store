@@ -10,6 +10,7 @@ const showDemo = process.env.NODE_ENV !== "production";
 
 export default function LoginPage() {
   const [role, setRole] = useState<Role>("admin");
+  const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -22,7 +23,12 @@ export default function LoginPage() {
       const res = await fetch("/api/admin/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: r, password: p }),
+        // El email solo se envía si el usuario lo escribió (ruta legacy intacta).
+        body: JSON.stringify({
+          role: r,
+          password: p,
+          ...(email.trim() ? { email: email.trim() } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) throw new Error((data as { error?: string }).error || "No se pudo iniciar sesión");
@@ -86,6 +92,18 @@ export default function LoginPage() {
           <h2 className="font-display text-3xl italic">Ingresar</h2>
           <p className="mt-1 text-sm text-ink/55">Usa tu cuenta de equipo.</p>
           <div className="mt-6 space-y-4">
+            <div>
+              <label className="label" htmlFor="login-email">Email (opcional)</label>
+              <input
+                id="login-email"
+                className="input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="tu@coralina.com"
+                autoComplete="username"
+              />
+            </div>
             <div>
               <label className="label" htmlFor="login-role">Rol</label>
               <select

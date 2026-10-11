@@ -14,7 +14,9 @@ export type AuditInput = {
     | "delete_hard"
     | "status_change"
     | "publish"
-    | "purge_audit";
+    | "purge_audit"
+    | "login"
+    | "logout";
   fieldChanged?: string;
   oldValue?: unknown;
   newValue?: unknown;

@@ -29,7 +29,17 @@ function createDb(): NodePgDatabase<Record<string, never>> {
     );
   }
 
-  const instance = drizzle(new Pool({ connectionString: databaseUrl }));
+  const instance = drizzle(
+    new Pool({
+      connectionString: databaseUrl,
+      // Tamaño del pool configurable (PGPOOL_MAX) + límites de espera para no
+      // colgar requests si la DB no responde. Clamp igual al de rate-limit.ts:
+      // un valor inválido (NaN/0) no debe romper la adquisición de conexiones.
+      max: Math.max(1, Number(process.env.PGPOOL_MAX) || 10),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    }),
+  );
   globalForDb.__arenaNextJsPostgresql = instance;
   return instance;
 }

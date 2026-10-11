@@ -2,8 +2,11 @@
 // Fail-closed en producción: sin CORALINA_ADMIN_PASSWORD se rechaza TODO (no hay
 // default público). En dev/QA cae a "coralina" para no romper el demo local.
 //
-// Nota: la comparación no es constant-time. Mitigado por el rate-limit del
-// boundary; se difiere un timingSafeEqual (reviews lo dejaron como opcional).
+// Comparación constant-time: se hashea ambos lados con sha256 (normaliza la
+// longitud) y se compara con timingSafeEqual — evita fugas por timing sin
+// filtrar la longitud del secreto.
+
+import { createHash, timingSafeEqual } from "node:crypto";
 
 export function adminPassword(): string {
   const p = process.env.CORALINA_ADMIN_PASSWORD;
@@ -17,7 +20,11 @@ export function adminPassword(): string {
 /** true solo si `input` coincide con la clave admin. Fail-closed: nunca lanza. */
 export function passwordMatches(input: unknown): boolean {
   try {
-    return String(input ?? "") === adminPassword();
+    const expected = adminPassword();
+    const given = String(input ?? "");
+    const a = createHash("sha256").update(given, "utf8").digest();
+    const b = createHash("sha256").update(expected, "utf8").digest();
+    return timingSafeEqual(a, b);
   } catch (e) {
     // Fail-closed: sin clave configurada en prod, TODO intento se deniega. Log para ops
     // (distingue "clave incorrecta" de "app mal configurada").

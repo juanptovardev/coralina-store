@@ -23,7 +23,11 @@ export async function getActor(): Promise<Actor> {
   if (decoded !== "admin" && decoded !== "asesor") {
     throw new ForbiddenError("Sesión inválida o ausente.");
   }
-  const role: Role = decoded;
+  return actorForRole(decoded);
+}
+
+/** Actor para un rol dado (mismo criterio que getActor). Útil al emitir sesión. */
+export function actorForRole(role: Role): Actor {
   return {
     role,
     name: NAMES[role],

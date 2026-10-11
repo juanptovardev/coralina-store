@@ -321,3 +321,16 @@ export const appMeta = pgTable("app_meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+/* ------------------------------------------------------------------ */
+/* Usuarios (login con scrypt, F4)                                     */
+/* ------------------------------------------------------------------ */
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name").notNull(),
+  role: text("role").$type<"admin" | "asesor">().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
