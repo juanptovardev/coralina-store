@@ -298,20 +298,8 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
-      if (status === "published") {
-        // Publicar exige al menos 1 imagen y 1 talla activa (validación server-side).
-        if (!Array.isArray(prod.images) || prod.images.length === 0) {
-          return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 imagen." }, { status: 400 });
-        }
-        const activeVariants = await db
-          .select({ id: variants.id })
-          .from(variants)
-          .where(and(eq(variants.productId, id), eq(variants.active, true)))
-          .limit(1);
-        if (activeVariants.length === 0) {
-          return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
-        }
-      }
+      // El gate de publicación (imágenes + talla activa) se evalúa después,
+      // con el estado EFECTIVO de esta petición (imágenes/tallas incluidas).
       patch.status = status;
     }
     if (body.categoryId !== undefined) {
@@ -342,10 +330,90 @@ export async function POST(req: Request) {
         patch.compareAtCents = compareAt;
       }
     }
-    if (body.title) patch.title = String(body.title);
-    if (Object.keys(patch).length === 0) {
-      return NextResponse.json({ ok: false, error: "No hay campos para actualizar." }, { status: 400 });
+    if (body.title !== undefined) {
+      const title = String(body.title ?? "").trim();
+      if (!title) {
+        return NextResponse.json({ ok: false, error: "El nombre no puede quedar vacío." }, { status: 400 });
+      }
+      patch.title = title;
     }
+    if (body.description !== undefined) {
+      patch.description = String(body.description ?? "").trim();
+    }
+    if (body.images !== undefined) {
+      if (!Array.isArray(body.images)) {
+        return NextResponse.json({ ok: false, error: "Las imágenes deben ser una lista." }, { status: 400 });
+      }
+      const imgs = (body.images as unknown[]).map((u: unknown) => String(u));
+      if (imgs.length > 12) {
+        return NextResponse.json({ ok: false, error: "Máximo 12 imágenes por producto." }, { status: 400 });
+      }
+      const bad = imgs.find(
+        (u) => !u.startsWith("/uploads/products/") && !u.startsWith("https://images.pexels.com/"),
+      );
+      if (bad) {
+        return NextResponse.json(
+          { ok: false, error: "Las imágenes deben estar en /uploads/products/ o venir de images.pexels.com." },
+          { status: 400 },
+        );
+      }
+      patch.images = imgs;
+    }
+    if (body.tags !== undefined) {
+      if (!Array.isArray(body.tags)) {
+        return NextResponse.json({ ok: false, error: "Las etiquetas deben ser una lista." }, { status: 400 });
+      }
+      const tags = [
+        ...new Set(
+          (body.tags as unknown[])
+            .map((t: unknown) => String(t).trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ];
+      if (tags.length > 10) {
+        return NextResponse.json({ ok: false, error: "Máximo 10 etiquetas por producto." }, { status: 400 });
+      }
+      patch.tags = tags;
+    }
+    // Si cambia el título, el handle se recalcula (patrón create_product).
+    if (patch.title !== undefined) {
+      const newHandle = slugify(patch.title as string);
+      if (!newHandle) {
+        return NextResponse.json({ ok: false, error: "El nombre no genera una URL válida." }, { status: 400 });
+      }
+      if (newHandle !== prod.handle) {
+        const dupe = await db
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.handle, newHandle))
+          .limit(1);
+        if (dupe.length > 0) {
+          return NextResponse.json({ ok: false, error: "Ya existe un producto con ese nombre." }, { status: 409 });
+        }
+        patch.handle = newHandle;
+      }
+    }
+    // Tallas: SOLO altas. Las existentes no se tocan (pedidos e inventario
+    // dependen de ellas); una talla que ya existe se ignora silenciosamente.
+    const rawNewSizes = Array.isArray(body.sizes)
+      ? (body.sizes as { size?: unknown; sku?: unknown }[])
+      : null;
+    const newSizes: { size: string; sku?: string }[] = [];
+    if (rawNewSizes) {
+      for (const s of rawNewSizes) {
+        const name = String(s?.size ?? "").trim();
+        if (!name) {
+          return NextResponse.json({ ok: false, error: "Cada talla necesita un nombre." }, { status: 400 });
+        }
+        if (newSizes.some((x) => x.size === name)) continue;
+        const sku =
+          s?.sku === undefined || s?.sku === null || String(s.sku).trim() === ""
+            ? undefined
+            : String(s.sku).trim();
+        newSizes.push({ size: name, sku });
+      }
+    }
+
     // Contrato simétrico con create_product: el ESTADO final (precio y
     // compareAt combinados con lo guardado) no puede quedar invertido.
     const effectivePrice = (patch.priceCents as number) ?? prod.priceCents;
@@ -357,21 +425,101 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
-    if (Object.keys(patch).length === 0) {
+
+    if (patch.status === "published") {
+      // Publicar exige al menos 1 imagen y 1 talla activa (estado EFECTIVO:
+      // imágenes/tallas que llegan en esta misma petición cuentan).
+      const effectiveImages = (patch.images as string[] | undefined) ?? (prod.images as string[]);
+      if (effectiveImages.length === 0) {
+        return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 imagen." }, { status: 400 });
+      }
+      const activeVariants = await db
+        .select({ id: variants.id })
+        .from(variants)
+        .where(and(eq(variants.productId, id), eq(variants.active, true)))
+        .limit(1);
+      if (activeVariants.length === 0 && newSizes.length === 0) {
+        return NextResponse.json({ ok: false, error: "Publicar exige al menos 1 talla activa." }, { status: 400 });
+      }
+    }
+
+    if (Object.keys(patch).length === 0 && newSizes.length === 0) {
       return NextResponse.json({ ok: false, error: "No hay cambios que aplicar." }, { status: 400 });
     }
-    await db.update(products).set(patch).where(eq(products.id, id));
-    await recordAudit({
-      actor,
-      module: "productos",
-      entityType: "product",
-      entityId: id,
-      action: "update",
-      oldValue: { status: prod.status, priceCents: prod.priceCents },
-      newValue: patch,
-      summary: `${actor.name} actualizó el producto «${prod.title}».`,
+
+    // Producto + variantes nuevas en UNA transacción: un fallo a mitad no
+    // deja el producto renombrado sin sus tallas (o viceversa).
+    const result = await db.transaction(async (tx) => {
+      let updated = prod;
+      if (Object.keys(patch).length > 0) {
+        [updated] = await tx.update(products).set(patch).where(eq(products.id, id)).returning();
+      }
+      const existing = await tx.select({ size: variants.size }).from(variants).where(eq(variants.productId, id));
+      const insertedSizes: string[] = [];
+      for (const ns of newSizes) {
+        if (existing.some((v) => v.size === ns.size)) continue;
+        const sku = ns.sku || `${updated.handle.toUpperCase().replace(/-/g, "")}-${ns.size}`;
+        const [v] = await tx
+          .insert(variants)
+          .values({ productId: id, size: ns.size, sku })
+          .returning();
+        await tx.insert(inventoryLevels).values({ variantId: v.id, stocked: 0, threshold: 4 });
+        insertedSizes.push(ns.size);
+      }
+      return { updated, insertedSizes };
     });
-    return NextResponse.json({ ok: true });
+    const { updated, insertedSizes } = result;
+
+    // Audit con old/new solo de los campos que realmente cambiaron.
+    const changedOld: Record<string, unknown> = {};
+    const changedNew: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      const before = (prod as unknown as Record<string, unknown>)[key];
+      if (JSON.stringify(before) !== JSON.stringify(value)) {
+        changedOld[key] = before;
+        changedNew[key] = value;
+      }
+    }
+    if (insertedSizes.length > 0) {
+      changedOld.tallasNuevas = [];
+      changedNew.tallasNuevas = insertedSizes;
+    }
+    // Petición 100% no-op (todo repetido): se responde OK sin ensuciar la bitácora.
+    if (Object.keys(changedNew).length > 0) {
+      await recordAudit({
+        actor,
+        module: "productos",
+        entityType: "product",
+        entityId: id,
+        action: "update",
+        oldValue: changedOld,
+        newValue: changedNew,
+        summary: `${actor.name} actualizó el producto «${updated.title}»${
+          insertedSizes.length > 0 ? ` y añadió ${insertedSizes.length} talla(s) nueva(s)` : ""
+        }.`,
+      });
+    }
+
+    const variantRows = await db
+      .select({
+        id: variants.id,
+        size: variants.size,
+        sku: variants.sku,
+        active: variants.active,
+        stock: inventoryLevels.stocked,
+        threshold: inventoryLevels.threshold,
+        updatedAt: inventoryLevels.updatedAt,
+      })
+      .from(variants)
+      .leftJoin(inventoryLevels, eq(inventoryLevels.variantId, variants.id))
+      .where(eq(variants.productId, id));
+
+    return NextResponse.json({
+      ok: true,
+      id: updated.id,
+      handle: updated.handle,
+      product: { ...updated, variants: variantRows },
+    });
   }
 
   if (action === "delete_product") {
@@ -452,10 +600,11 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
-    await db
+    const [row] = await db
       .update(inventoryLevels)
       .set({ stocked: value, updatedAt: new Date() })
-      .where(eq(inventoryLevels.variantId, variantId));
+      .where(eq(inventoryLevels.variantId, variantId))
+      .returning({ stocked: inventoryLevels.stocked, updatedAt: inventoryLevels.updatedAt });
     await recordAudit({
       actor,
       module: "inventario",
@@ -467,7 +616,7 @@ export async function POST(req: Request) {
       newValue: value,
       summary: `${actor.name} ajustó el stock de la variante #${variantId} de ${level.stocked} a ${value}.`,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, stocked: row.stocked, updatedAt: row.updatedAt.toISOString() });
   }
 
   if (action === "update_threshold") {
@@ -485,10 +634,11 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
-    await db
+    const [row] = await db
       .update(inventoryLevels)
       .set({ threshold: value, updatedAt: new Date() })
-      .where(eq(inventoryLevels.variantId, variantId));
+      .where(eq(inventoryLevels.variantId, variantId))
+      .returning({ threshold: inventoryLevels.threshold, updatedAt: inventoryLevels.updatedAt });
     await recordAudit({
       actor,
       module: "inventario",
@@ -499,7 +649,77 @@ export async function POST(req: Request) {
       newValue: value,
       summary: `${actor.name} cambió el umbral de alerta de la variante #${variantId} a ${value}.`,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, threshold: row.threshold, updatedAt: row.updatedAt.toISOString() });
+  }
+
+  if (action === "bulk_stock") {
+    const ids = (Array.isArray(body.variantIds) ? body.variantIds : [])
+      .map(Number)
+      .filter((n: number) => Number.isInteger(n) && n > 0);
+    const mode = body.mode === "set" ? "set" : body.mode === "add" ? "add" : null;
+    if (!mode) {
+      return NextResponse.json({ ok: false, error: "Modo inválido: usa set o add." }, { status: 400 });
+    }
+    const value = Number(body.value);
+    if (!Number.isInteger(value)) {
+      return NextResponse.json({ ok: false, error: "El valor debe ser un número entero." }, { status: 400 });
+    }
+    if (mode === "set" && value < 0) {
+      return NextResponse.json({ ok: false, error: "Para reponer, el valor debe ser 0 o más." }, { status: 400 });
+    }
+    if (ids.length === 0) {
+      return NextResponse.json({ ok: false, error: "Sin variantes seleccionadas." }, { status: 400 });
+    }
+
+    // En UNA tx: SELECT ... FOR UPDATE bloquea las filas, se aplica el target
+    // (set) o el delta (add) con clamp 0..999999 y se actualiza en el mismo
+    // bloque. Un fallo a mitad no deja el inventario a medias.
+    const cambios = await db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ variantId: inventoryLevels.variantId, stocked: inventoryLevels.stocked })
+        .from(inventoryLevels)
+        .where(inArray(inventoryLevels.variantId, ids))
+        .for("update");
+      const found = new Map(rows.map((r) => [r.variantId, r.stocked]));
+      const cambios: { variantId: number; old: number; new: number; updatedAt: string }[] = [];
+      for (const vid of ids) {
+        const oldStock = found.get(vid);
+        if (oldStock === undefined) continue;
+        const target = mode === "set" ? value : oldStock + value;
+        const clamped = Math.min(999999, Math.max(0, target));
+        const [row] = await tx
+          .update(inventoryLevels)
+          .set({ stocked: clamped, updatedAt: new Date() })
+          .where(eq(inventoryLevels.variantId, vid))
+          .returning({ stocked: inventoryLevels.stocked, updatedAt: inventoryLevels.updatedAt });
+        cambios.push({
+          variantId: vid,
+          old: oldStock,
+          new: row.stocked,
+          updatedAt: row.updatedAt.toISOString(),
+        });
+      }
+      return cambios;
+    });
+
+    // Audit agregado: UN solo insert con el detalle completo, escrito tras el
+    // commit (igual que delete_hard): la bitácora no afirma lo que no pasó.
+    await recordAudit({
+      actor,
+      module: "inventario",
+      entityType: "inventory_level",
+      action: "bulk_stock",
+      fieldChanged: "stocked",
+      newValue: {
+        mode,
+        value,
+        cambios: cambios.map((c) => ({ variantId: c.variantId, old: c.old, new: c.new })),
+      },
+      summary: `${actor.name} ajustó el stock de ${cambios.length} variante(s) en bloque (${
+        mode === "set" ? `reponer a ${value}` : `${value >= 0 ? "+" : ""}${value}`
+      }).`,
+    });
+    return NextResponse.json({ ok: true, cambios });
   }
 
   return NextResponse.json({ ok: false, error: `Acción desconocida: ${action}` }, { status: 400 });

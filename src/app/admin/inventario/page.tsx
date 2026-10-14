@@ -4,12 +4,14 @@ import { useState } from "react";
 import {
   Badge,
   Card,
+  ConfirmDialog,
   csvCell,
   EmptyState,
   notify,
   PageHeader,
   Skeleton,
   Toast,
+  useBusy,
   useDebouncedValue,
   useJson,
   postJson,
@@ -39,6 +41,8 @@ type Level = {
   updatedAt: string;
 };
 
+type BulkCambio = { variantId: number; old: number; new: number; updatedAt: string };
+
 const LEVEL_TONE: Record<string, "green" | "amber" | "red" | "blue"> = {
   high: "green",
   med: "blue",
@@ -46,32 +50,120 @@ const LEVEL_TONE: Record<string, "green" | "amber" | "red" | "blue"> = {
   out: "red",
 };
 
-/** Umbral de la alerta de stock bajo (F5): variantes con stock <= 3. */
-const LOW_STOCK_THRESHOLD = 3;
-
 export default function InventarioPage() {
   const { data, loading, reload } = useJson<{ summary: Summary[]; levels: Level[] }>("/api/admin/inventory");
   const [category, setCategory] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const dq = useDebouncedValue(q, 300);
+  const { busy, run } = useBusy();
 
-  const levels = (data?.levels ?? []).filter((l) => {
+  // Selección + barra de acciones en bloque (aparece con ≥ 1 seleccionado).
+  const [selected, setSelected] = useState<number[]>([]);
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkConfirm, setBulkConfirm] = useState<{ mode: "set" | "add"; value: number } | null>(null);
+
+  // Reload quirúrgico: los valores nuevos llegan en la respuesta y se aplican
+  // SOLO a las filas tocadas (sin recargar la vista completa).
+  const [overrides, setOverrides] = useState<
+    Record<number, { stocked?: number; threshold?: number; updatedAt?: string }>
+  >({});
+
+  const rawLevels = (data?.levels ?? []).map((l) => {
+    const o = overrides[l.variantId];
+    return o
+      ? {
+          ...l,
+          stocked: o.stocked ?? l.stocked,
+          threshold: o.threshold ?? l.threshold,
+          updatedAt: o.updatedAt ?? l.updatedAt,
+        }
+      : l;
+  });
+
+  const levels = rawLevels.filter((l) => {
     if (category && l.categoryId !== category) return false;
     if (dq && !`${l.productTitle} ${l.sku}`.toLowerCase().includes(dq.toLowerCase())) return false;
     return true;
   });
 
-  // Alerta de stock bajo (F5): sobre TODAS las variantes (ignora filtros de la
-  // tabla), incluye agotadas (stock 0) — son las más urgentes.
-  const lowStock = (data?.levels ?? [])
-    .filter((l) => l.stocked <= LOW_STOCK_THRESHOLD)
+  // Alerta de stock bajo: contra el UMBRAL de cada variante (editable en la
+  // tabla), no contra una constante. Incluye agotadas (stock 0).
+  const lowStock = rawLevels
+    .filter((l) => l.stocked <= l.threshold)
     .sort((a, b) => a.stocked - b.stocked);
 
-  async function update(body: Record<string, unknown>) {
-    const { ok, error } = await postJson("/api/admin/catalog", body);
-    notify(ok ? "Inventario actualizado" : (error ?? "Error al actualizar"), ok ? "ok" : "error");
-    reload();
+  function patchRow(variantId: number, patch: { stocked?: number; threshold?: number; updatedAt?: string }) {
+    setOverrides((prev) => ({ ...prev, [variantId]: { ...prev[variantId], ...patch } }));
   }
+
+  async function updateStock(l: Level, value: number) {
+    const { ok, error, json } = await postJson<{ stocked?: number; updatedAt?: string }>(
+      "/api/admin/catalog",
+      {
+        action: "update_stock",
+        variantId: l.variantId,
+        stocked: value,
+        expectedUpdatedAt: l.updatedAt,
+      },
+    );
+    if (!ok) {
+      notify(error ?? "Error al actualizar", "error");
+      return;
+    }
+    patchRow(l.variantId, { stocked: json.stocked ?? value, updatedAt: json.updatedAt });
+    notify(`Stock de ${l.productTitle} (${l.size}): de ${l.stocked} a ${json.stocked ?? value}`);
+  }
+
+  async function updateThreshold(l: Level, value: number) {
+    const { ok, error, json } = await postJson<{ threshold?: number; updatedAt?: string }>(
+      "/api/admin/catalog",
+      {
+        action: "update_threshold",
+        variantId: l.variantId,
+        threshold: value,
+        expectedUpdatedAt: l.updatedAt,
+      },
+    );
+    if (!ok) {
+      notify(error ?? "Error al actualizar", "error");
+      return;
+    }
+    patchRow(l.variantId, { threshold: json.threshold ?? value, updatedAt: json.updatedAt });
+    notify(`Umbral de ${l.productTitle} (${l.size}): ${json.threshold ?? value}`);
+  }
+
+  async function applyBulk(mode: "set" | "add", value: number) {
+    const { ok, error, json } = await postJson<{ cambios?: BulkCambio[] }>("/api/admin/catalog", {
+      action: "bulk_stock",
+      variantIds: selected,
+      mode,
+      value,
+    });
+    if (!ok) {
+      notify(error ?? "Error al actualizar", "error");
+      return;
+    }
+    const cambios = json.cambios ?? [];
+    setOverrides((prev) => {
+      const next = { ...prev };
+      for (const c of cambios) {
+        next[c.variantId] = { ...next[c.variantId], stocked: c.new, updatedAt: c.updatedAt };
+      }
+      return next;
+    });
+    const ejemplo = cambios[0];
+    notify(
+      cambios.length > 0
+        ? `${cambios.length} SKUs actualizados: de ${ejemplo.old} a ${ejemplo.new}`
+        : "Sin cambios que aplicar",
+    );
+    setSelected([]);
+    setBulkValue("");
+  }
+
+  const bulkN = Number.parseInt(bulkValue, 10);
+  const bulkValid = Number.isInteger(bulkN) && bulkN > 0;
+  const setValid = Number.isInteger(bulkN) && bulkN >= 0;
 
   function exportCsv() {
     const header = ["categoria", "producto", "talla", "sku", "stock", "umbral"].map(csvCell).join(",");
@@ -94,25 +186,28 @@ export default function InventarioPage() {
         actions={
           <>
             {lowStock.length > 0 && (
-              <Badge tone="red" dot title={`Variantes con stock ≤ ${LOW_STOCK_THRESHOLD}`}>
+              <Badge tone="red" dot title="Variantes con stock en o por debajo de su umbral">
                 stock bajo: {lowStock.length}
               </Badge>
             )}
             <button className="dash-btn" onClick={exportCsv}>
               Exportar CSV
             </button>
+            <button className="dash-btn" onClick={reload} title="Recargar la vista">
+              ↻ Actualizar
+            </button>
           </>
         }
       />
 
-      {/* Alertas de stock bajo (F5): ancla #inv-<variantId> lleva a la fila editable */}
+      {/* Alertas de stock bajo (umbral por variante): ancla #inv-<variantId> lleva a la fila editable */}
       {lowStock.length > 0 && (
         <div
           className="dash-panel mb-4 border border-[#b3261e]/30 bg-[#fde8e6]/40 p-4"
           role="alert"
         >
           <p className="text-[0.8rem] font-semibold text-[var(--d-danger)]">
-            Alertas de stock bajo · {lowStock.length} variante(s) con ≤ {LOW_STOCK_THRESHOLD} unidades
+            Alertas de stock bajo · {lowStock.length} variante(s) en o por debajo de su umbral
           </p>
           <ul className="mt-2 space-y-1.5 text-xs">
             {lowStock.map((l) => (
@@ -122,7 +217,9 @@ export default function InventarioPage() {
                   <span className="font-mono opacity-70">{l.sku}</span>
                 </span>
                 <span className="flex items-center gap-2">
-                  <Badge tone={l.stocked === 0 ? "red" : "amber"}>{l.stocked} uds</Badge>
+                  <Badge tone={l.stocked === 0 ? "red" : "amber"} title={`Umbral: ${l.threshold}`}>
+                    {l.stocked} uds
+                  </Badge>
                   <a
                     className="dash-btn px-2.5 py-0.5 text-[0.7rem]"
                     href={`#inv-${l.variantId}`}
@@ -207,6 +304,47 @@ export default function InventarioPage() {
             <span className="text-xs opacity-60">{levels.length} variantes</span>
           </Card>
 
+          {/* Barra masiva: aparece con ≥ 1 variante seleccionada */}
+          {selected.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-full bg-[var(--d-bg)] px-4 py-3 text-white">
+              <span className="text-xs font-semibold">{selected.length} seleccionado(s)</span>
+              <input
+                type="number"
+                className="admin-input max-w-[6.5rem] py-1 text-xs"
+                placeholder="Cantidad"
+                value={bulkValue}
+                onChange={(e) => setBulkValue(e.target.value)}
+              />
+              <button
+                className="dash-btn dash-btn-primary py-1"
+                disabled={busy || !setValid}
+                title={setValid ? `Reponer ${selected.length} variante(s) a ${bulkN}` : "Escribe un entero ≥ 0"}
+                onClick={() => setBulkConfirm({ mode: "set", value: bulkN })}
+              >
+                Reponer a {setValid ? bulkN : "…"}
+              </button>
+              <button
+                className="dash-btn py-1"
+                disabled={busy || !bulkValid}
+                title={bulkValid ? `Sumar ${bulkN} a ${selected.length} variante(s)` : "Escribe un entero mayor a 0"}
+                onClick={() => setBulkConfirm({ mode: "add", value: bulkN })}
+              >
+                +{bulkValid ? bulkN : "…"}
+              </button>
+              <button
+                className="dash-btn py-1"
+                disabled={busy || !bulkValid}
+                title={bulkValid ? `Restar ${bulkN} a ${selected.length} variante(s)` : "Escribe un entero mayor a 0"}
+                onClick={() => setBulkConfirm({ mode: "add", value: -bulkN })}
+              >
+                −{bulkValid ? bulkN : "…"}
+              </button>
+              <button className="dash-btn py-1" onClick={() => setSelected([])}>
+                Limpiar
+              </button>
+            </div>
+          )}
+
           {levels.length === 0 ? (
             <div className="mt-4">
               <EmptyState
@@ -216,9 +354,19 @@ export default function InventarioPage() {
             </div>
           ) : (
             <div className="dash-panel dash-scroll mt-4 overflow-auto scroll-thin">
-              <table className="dash-table min-w-[820px]">
+              <table className="dash-table min-w-[880px]">
               <thead>
                 <tr>
+                  <th className="w-10 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleccionar todas las variantes visibles"
+                      checked={levels.length > 0 && levels.every((l) => selected.includes(l.variantId))}
+                      onChange={(e) =>
+                        setSelected(e.target.checked ? levels.map((l) => l.variantId) : [])
+                      }
+                    />
+                  </th>
                   <th className="px-4 py-3">Producto</th>
                   <th className="px-4 py-3">Talla</th>
                   <th className="px-4 py-3">SKU</th>
@@ -230,6 +378,20 @@ export default function InventarioPage() {
               <tbody>
                 {levels.map((l) => (
                   <tr key={l.variantId} id={`inv-${l.variantId}`}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleccionar ${l.productTitle} (${l.size})`}
+                        checked={selected.includes(l.variantId)}
+                        onChange={(e) =>
+                          setSelected(
+                            e.target.checked
+                              ? [...selected, l.variantId]
+                              : selected.filter((id) => id !== l.variantId),
+                          )
+                        }
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -247,16 +409,12 @@ export default function InventarioPage() {
                         type="number"
                         min={0}
                         defaultValue={l.stocked}
+                        key={`stock-${l.variantId}-${l.stocked}-${l.updatedAt}`}
                         className="admin-input max-w-[5.5rem] py-1"
                         onBlur={(e) => {
                           const value = Number(e.target.value);
                           if (value === l.stocked) return;
-                          update({
-                            action: "update_stock",
-                            variantId: l.variantId,
-                            stocked: value,
-                            expectedUpdatedAt: l.updatedAt,
-                          });
+                          void updateStock(l, value);
                         }}
                       />
                     </td>
@@ -265,11 +423,12 @@ export default function InventarioPage() {
                         type="number"
                         min={0}
                         defaultValue={l.threshold}
+                        key={`th-${l.variantId}-${l.threshold}-${l.updatedAt}`}
                         className="admin-input max-w-[5rem] py-1"
                         onBlur={(e) => {
                           const value = Number(e.target.value);
                           if (value === l.threshold) return;
-                          update({ action: "update_threshold", variantId: l.variantId, threshold: value });
+                          void updateThreshold(l, value);
                         }}
                       />
                     </td>
@@ -290,6 +449,24 @@ export default function InventarioPage() {
           )}
         </>
       )}
+
+      {/* Confirmación antes de aplicar el ajuste en bloque */}
+      <ConfirmDialog
+        open={bulkConfirm !== null}
+        onClose={() => setBulkConfirm(null)}
+        title={bulkConfirm?.mode === "set" ? "Reponer stock en bloque" : "Ajustar stock en bloque"}
+        message={
+          bulkConfirm
+            ? bulkConfirm.mode === "set"
+              ? `Se repondrá el stock de ${selected.length} variante(s) a ${bulkConfirm.value} unidades. Los valores quedan entre 0 y 999.999.`
+              : `Se ${bulkConfirm.value > 0 ? "sumarán" : "restarán"} ${Math.abs(bulkConfirm.value)} unidad(es) al stock de ${selected.length} variante(s). Los valores quedan entre 0 y 999.999.`
+            : ""
+        }
+        confirmLabel="Aplicar"
+        onConfirm={() => {
+          if (bulkConfirm) void run(() => applyBulk(bulkConfirm.mode, bulkConfirm.value));
+        }}
+      />
 
       <Toast />
     </div>

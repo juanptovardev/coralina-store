@@ -14,6 +14,7 @@ import {
   useJson,
   postJson,
 } from "@/components/admin/ui";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import type { SizeChartColumn, SizeChartRow } from "@/db/schema";
 
 type Cat = {
@@ -315,6 +316,11 @@ export default function CategoriasPage() {
               className="admin-input"
               value={newCat.imageUrl}
               onChange={(e) => setNewCat({ ...newCat, imageUrl: e.target.value })}
+            />
+            <ImageUploadField
+              className="mt-2"
+              allowUrl={false}
+              onUploaded={(url) => setNewCat({ ...newCat, imageUrl: url })}
             />
           </div>
           <div>

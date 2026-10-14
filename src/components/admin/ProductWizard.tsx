@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { postJson, useBusy } from "@/components/admin/ui";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import type { SizeChartColumn, SizeChartRow } from "@/db/schema";
 import { formatCOP } from "@/lib/constants";
+import { formatPriceInput, parsePriceInput } from "@/lib/format";
 
 type Cat = {
   id: number;
@@ -47,14 +49,13 @@ export function ProductWizard({
     for (const s of initial?.sizes ?? []) map[s.size] = { on: true, stock: s.stock };
     return map;
   });
-  const [price, setPrice] = useState(initial ? String(initial.priceCents / 100) : "");
+  const [newSizes, setNewSizes] = useState<string[]>([]);
+  const [newSizeInput, setNewSizeInput] = useState("");
+  const [price, setPrice] = useState(initial ? formatPriceInput(initial.priceCents) : "");
   const [compareAt, setCompareAt] = useState(
-    initial?.compareAtCents ? String(initial.compareAtCents / 100) : "",
+    initial?.compareAtCents ? formatPriceInput(initial.compareAtCents) : "",
   );
   const [images, setImages] = useState<string[]>(initial?.images ?? []);
-  const [imageInput, setImageInput] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadErr, setUploadErr] = useState("");
   const [featured, setFeatured] = useState(initial ? initial.tags.includes("home") : true);
   const [error, setError] = useState("");
   const { busy, run } = useBusy();
@@ -71,60 +72,117 @@ export function ProductWizard({
     [chartRows, sizes],
   );
 
-  async function uploadFile(file: File) {
-    setUploadErr("");
-    if (!file.type.startsWith("image/")) {
-      setUploadErr("Solo imágenes (JPG, PNG, WEBP, AVIF, GIF).");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadErr("La imagen supera 5 MB.");
-      return;
-    }
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await fetch("/api/admin/uploads", { method: "POST", body: fd });
-      const j = await r.json();
-      if (j.ok) setImages((prev) => [...prev, j.url as string]);
-      else setUploadErr(String(j.error ?? "No se pudo subir la imagen."));
-    } catch {
-      setUploadErr("Error de red al subir la imagen.");
-    } finally {
-      setUploading(false);
-    }
+  // Precios: entrada en pesos con formato es-CO, salida en centavos.
+  const priceCents = parsePriceInput(price);
+  const compareAtCents = compareAt.trim() ? parsePriceInput(compareAt) : null;
+
+  // Gate de publicación: Publicar exige el checklist completo (5/5).
+  const checklist = [
+    { ok: title.trim().length > 0, text: "Nombre definido" },
+    { ok: categoryId > 0, text: "Categoría asignada" },
+    {
+      ok: editing ? (initial?.sizes.length ?? 0) + newSizes.length > 0 : activeSizes.length > 0,
+      text: "Al menos una talla activa",
+    },
+    { ok: (priceCents ?? 0) > 0, text: "Precio mayor a 0" },
+    { ok: images.length > 0, text: "Al menos una imagen" },
+  ];
+  const missing = checklist.filter((c) => !c.ok).map((c) => c.text);
+  const canPublish = missing.length === 0;
+
+  const existingSizeNames = initial?.sizes.map((s) => s.size) ?? [];
+  const newSizeTrimmed = newSizeInput.trim();
+  const newSizeDup =
+    newSizeTrimmed.length > 0 &&
+    (existingSizeNames.includes(newSizeTrimmed) || newSizes.includes(newSizeTrimmed));
+
+  function addNewSize() {
+    const name = newSizeTrimmed;
+    if (!name) return;
+    if (existingSizeNames.includes(name) || newSizes.includes(name)) return;
+    setNewSizes([...newSizes, name]);
+    setNewSizeInput("");
+  }
+
+  // La imagen elegida pasa a la primera posición: esa es la portada.
+  function makeCover(index: number) {
+    if (index <= 0) return;
+    setImages((prev) => {
+      const next = [...prev];
+      const [img] = next.splice(index, 1);
+      next.unshift(img);
+      return next;
+    });
   }
 
   async function removeImage(img: string) {
-    setImages(images.filter((x) => x !== img));
+    setImages((prev) => prev.filter((x) => x !== img));
     if (img.startsWith("/uploads/")) {
       // También elimina el archivo del servidor.
       await fetch(`/api/admin/uploads?url=${encodeURIComponent(img)}`, { method: "DELETE" }).catch(() => {});
     }
   }
 
+  // Al editar se conservan las demás etiquetas: solo se agrega/quita «home».
+  function tagsPayload(): string[] {
+    const base = initial?.tags ?? [];
+    return featured ? [...new Set([...base, "home"])] : base.filter((t) => t !== "home");
+  }
+
+  const dirty = Boolean(
+    initial &&
+      (title !== initial.title ||
+        description !== initial.description ||
+        (priceCents !== null && priceCents !== initial.priceCents) ||
+        (compareAtCents ?? null) !== initial.compareAtCents ||
+        images.join("\n") !== initial.images.join("\n") ||
+        tagsPayload().join("|") !== initial.tags.join("|") ||
+        newSizes.length > 0),
+  );
+
+  const previewSizes = useMemo(
+    () =>
+      editing
+        ? [...(initial?.sizes ?? []).map((s) => s.size), ...newSizes]
+        : activeSizes.map((s) => s.size),
+    [editing, initial, newSizes, activeSizes],
+  );
+
   async function submit(status: "draft" | "published" | "archived") {
     setError("");
+    if (priceCents === null) {
+      setError("Revisa el precio: usa números como 28990 o 28.990,50.");
+      return;
+    }
+    if (compareAt.trim() && compareAtCents === null) {
+      setError("Revisa el precio tachado: usa números como 339000 o 33.900.");
+      return;
+    }
     await run(async () => {
-      const { ok, error } = await postJson("/api/admin/catalog",
+      const { ok, error } = await postJson(
+        "/api/admin/catalog",
         initial
           ? {
               action: "update_product",
               id: initial.id,
               title,
               categoryId,
-              priceCents: Math.round(Number(price || 0) * 100),
-              compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
+              priceCents,
+              compareAtCents,
               status,
+              description,
+              images,
+              tags: tagsPayload(),
+              // Solo tallas NUEVAS: las existentes no se tocan.
+              sizes: newSizes.map((s) => ({ size: s })),
             }
           : {
               action: "create_product",
               title,
               description,
               categoryId,
-              priceCents: Math.round(Number(price || 0) * 100),
-              compareAtCents: compareAt ? Math.round(Number(compareAt) * 100) : null,
+              priceCents,
+              compareAtCents,
               images,
               sizes: activeSizes,
               tags: featured ? ["home"] : [],
@@ -175,21 +233,14 @@ export function ProductWizard({
             <textarea
               className="admin-input h-28"
               value={description}
-              disabled={editing}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Triangular con lazos ajustables, tela italiana UV50+…"
             />
-            {editing && (
-              <p className="mt-1 text-[0.7rem] opacity-60">
-                La descripción solo se edita al crear el producto (la API de update no la modifica).
-              </p>
-            )}
           </div>
           <label className="flex items-center gap-2 text-xs">
             <input
               type="checkbox"
               checked={featured}
-              disabled={editing}
               onChange={(e) => setFeatured(e.target.checked)}
             />
             Mostrar en la sección «Lo más deseado» del home (etiqueta <code>home</code>)
@@ -223,40 +274,87 @@ export function ProductWizard({
             </p>
           </div>
           <div className="card-soft p-4">
-            <p className="admin-label">{editing ? "Tallas actuales (se editan en Inventario)" : "Tallas a activar y stock inicial"}</p>
-            <div className="mt-2 space-y-2">
-              {chartRows.length === 0 && (
-                <p className="text-xs opacity-60">Esta categoría no tiene tabla de tallas.</p>
-              )}
-              {chartRows.map((r) => {
-                const size = String(r.size);
-                const state = sizes[size] ?? { on: false, stock: 0 };
-                return (
-                  <div key={size} className="flex items-center gap-3">
-                    <label className="flex w-28 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={state.on}
-                        disabled={editing}
-                        onChange={(e) => setSizes({ ...sizes, [size]: { ...state, on: e.target.checked } })}
-                      />
-                      <span className="font-medium">{size}</span>
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      disabled={!state.on || editing}
-                      className="admin-input max-w-[7rem] disabled:opacity-40"
-                      value={state.stock}
-                      onChange={(e) => setSizes({ ...sizes, [size]: { ...state, stock: Number(e.target.value) } })}
-                    />
-                    <span className="text-xs opacity-55">
-                      SKU: {title ? `${title.toUpperCase().slice(0, 8)}…-${size}` : `—-${size}`}
+            {editing ? (
+              <>
+                <p className="admin-label">Tallas existentes</p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(initial?.sizes ?? []).map((s) => (
+                    <span key={s.size} className="chip bg-[var(--d-panel-2)]">
+                      {s.size}
                     </span>
+                  ))}
+                </div>
+                <p className="mt-2 text-[0.7rem] opacity-60">
+                  Las tallas existentes no se pueden borrar (hay pedidos e inventario que dependen de
+                  ellas). Su stock se edita en Inventario.
+                </p>
+                <div className="mt-4 border-t border-[var(--d-line)] pt-3">
+                  <p className="admin-label">Añadir talla nueva</p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      className="admin-input max-w-[9rem]"
+                      placeholder="Ej. XL"
+                      value={newSizeInput}
+                      onChange={(e) => setNewSizeInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") addNewSize();
+                      }}
+                    />
+                    <button
+                      className="dash-btn shrink-0 text-xs"
+                      disabled={newSizeTrimmed.length === 0 || newSizeDup}
+                      title={newSizeDup ? "Esa talla ya existe" : undefined}
+                      onClick={addNewSize}
+                    >
+                      Añadir talla
+                    </button>
                   </div>
-                );
-              })}
-            </div>
+                  {newSizeDup && <p className="mt-1 text-xs text-[var(--d-danger)]">Esa talla ya existe.</p>}
+                  {newSizes.length > 0 && (
+                    <p className="mt-2 text-xs">
+                      Nuevas: {newSizes.join(", ")}{" "}
+                      <span className="opacity-55">(quedan con stock 0; ajústalo en Inventario)</span>
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="admin-label">Tallas a activar y stock inicial</p>
+                <div className="mt-2 space-y-2">
+                  {chartRows.length === 0 && (
+                    <p className="text-xs opacity-60">Esta categoría no tiene tabla de tallas.</p>
+                  )}
+                  {chartRows.map((r) => {
+                    const size = String(r.size);
+                    const state = sizes[size] ?? { on: false, stock: 0 };
+                    return (
+                      <div key={size} className="flex items-center gap-3">
+                        <label className="flex w-28 items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={state.on}
+                            onChange={(e) => setSizes({ ...sizes, [size]: { ...state, on: e.target.checked } })}
+                          />
+                          <span className="font-medium">{size}</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          disabled={!state.on}
+                          className="admin-input max-w-[7rem] disabled:opacity-40"
+                          value={state.stock}
+                          onChange={(e) => setSizes({ ...sizes, [size]: { ...state, stock: Number(e.target.value) } })}
+                        />
+                        <span className="text-xs opacity-55">
+                          SKU: {title ? `${title.toUpperCase().slice(0, 8)}…-${size}` : `—-${size}`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -273,81 +371,38 @@ export function ProductWizard({
               <input className="admin-input" value={compareAt} onChange={(e) => setCompareAt(e.target.value)} placeholder="339000" />
             </div>
           </div>
-          {!editing ? (
-            <>
-              <div>
-                <label className="admin-label">Imágenes (sube un archivo o pega la URL)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
-                    className="admin-input shrink-0 text-xs"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void uploadFile(f);
-                      e.target.value = "";
-                    }}
-                  />
-                  {uploading && <span className="self-center text-xs opacity-60">Subiendo…</span>}
-                </div>
-                {uploadErr && <p className="mt-1 text-xs text-red-400">{uploadErr}</p>}
-                <div className="mt-2 flex gap-2">
-                  <input
-                    className="admin-input"
-                    value={imageInput}
-                    onChange={(e) => setImageInput(e.target.value)}
-                    placeholder="https://…"
-                  />
+          <div>
+            <ImageUploadField label="Imágenes" onUploaded={(url) => setImages((prev) => [...prev, url])} />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {images.map((img, i) => (
+                <div key={img} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
+                  {i === 0 && (
+                    <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
+                  )}
                   <button
-                    className="dash-btn shrink-0 text-xs"
-                    onClick={() => {
-                      if (!imageInput.startsWith("http")) return;
-                      setImages([...images, imageInput]);
-                      setImageInput("");
-                    }}
+                    className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs text-white"
+                    onClick={() => void removeImage(img)}
                   >
-                    Añadir
+                    ×
                   </button>
-                </div>
-                <p className="mt-1 text-xs opacity-50">Desde tu equipo (máx 5 MB) o URL externa.</p>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {images.map((img, i) => (
-                  <div key={img} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
-                    {i === 0 && (
-                      <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
-                    )}
+                  {i > 0 && (
                     <button
-                      className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs text-white"
-                      onClick={() => void removeImage(img)}
+                      className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[0.6rem] text-white"
+                      onClick={() => makeCover(i)}
                     >
-                      ×
+                      Hacer portada
                     </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {images.map((img, i) => (
-                  <div key={img} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img} alt="" className="h-24 w-20 rounded object-cover" />
-                    {i === 0 && (
-                      <span className="chip absolute left-1 top-1 bg-[var(--d-accent)] text-white">1ª</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <p className="mt-2 text-xs opacity-50">
-                Las imágenes no se editan aquí: la API de update no las modifica y borrarlas
-                rompería la ficha de la tienda. Se gestionan al crear o re-creando el producto.
-              </p>
-            </>
-          )}
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs opacity-50">
+              La primera imagen es la portada. Máximo 12; se aceptan archivos o URLs de
+              images.pexels.com.
+            </p>
+          </div>
         </div>
       )}
 
@@ -369,13 +424,13 @@ export function ProductWizard({
               <p className="kicker mt-3 text-[var(--d-accent)]">{category?.name}</p>
               <h3 className="font-display mt-1 text-2xl">{title || "Nombre del producto"}</h3>
               <p className="mt-1 text-lg font-semibold text-[var(--d-accent)]">
-                {formatCOP(Math.round(Number(price || 0) * 100))}
+                {formatCOP(priceCents ?? 0)}
               </p>
               <p className="mt-2 text-xs opacity-70">{description || "Descripción corta…"}</p>
               <div className="mt-3 flex flex-wrap gap-1">
-                {activeSizes.map((s) => (
-                  <span key={s.size} className="chip bg-[var(--d-panel-2)]">
-                    {s.size}
+                {previewSizes.map((s) => (
+                  <span key={s} className="chip bg-[var(--d-panel-2)]">
+                    {s}
                   </span>
                 ))}
               </div>
@@ -384,15 +439,13 @@ export function ProductWizard({
           <div>
             <p className="admin-label">Checklist de publicación</p>
             <ul className="mt-2 space-y-2 text-xs">
-              <Check ok={Boolean(title)} text="Nombre definido" />
-              <Check ok={Boolean(categoryId)} text="Categoría asignada" />
-              <Check ok={activeSizes.length > 0} text="Al menos una talla activa" />
-              <Check ok={Number(price) > 0} text="Precio mayor a 0" />
-              <Check ok={images.length > 0} text="Al menos una imagen" />
+              {checklist.map((c) => (
+                <Check key={c.text} ok={c.ok} text={c.text} />
+              ))}
             </ul>
             <p className="mt-4 text-[0.7rem] opacity-60">
               {editing
-                ? "Los cambios se aplican sobre el producto existente y quedan en la bitácora. La descripción y las imágenes solo se guardan al crear (la API de update no las modifica)."
+                ? "Los cambios (descripción, imágenes, tallas nuevas) se aplican sobre el producto existente y quedan en la bitácora."
                 : "Al guardar se crean las variantes por talla, sus SKU y su nivel de inventario en la bodega principal. Todo queda en la bitácora."}
             </p>
           </div>
@@ -412,13 +465,19 @@ export function ProductWizard({
         ) : initial ? (
           <div className="flex gap-2">
             {initial.status !== "published" && (
-              <button className="dash-btn text-xs" disabled={busy} onClick={() => submit("published")}>
+              <button
+                className="dash-btn text-xs"
+                disabled={busy || !canPublish}
+                title={canPublish ? undefined : `Falta: ${missing.join(" · ")}`}
+                onClick={() => submit("published")}
+              >
                 Guardar y publicar
               </button>
             )}
             <button
               className="dash-btn dash-btn-primary text-xs"
-              disabled={busy}
+              disabled={busy || !dirty}
+              title={dirty ? undefined : "No hay cambios por guardar"}
               onClick={() => submit(initial.status as "draft" | "published" | "archived")}
             >
               Guardar cambios
@@ -429,7 +488,12 @@ export function ProductWizard({
             <button className="dash-btn text-xs" disabled={busy} onClick={() => submit("draft")}>
               Guardar borrador
             </button>
-            <button className="dash-btn dash-btn-primary text-xs" disabled={busy} onClick={() => submit("published")}>
+            <button
+              className="dash-btn dash-btn-primary text-xs"
+              disabled={busy || !canPublish}
+              title={canPublish ? undefined : `Falta: ${missing.join(" · ")}`}
+              onClick={() => submit("published")}
+            >
               Publicar
             </button>
           </div>

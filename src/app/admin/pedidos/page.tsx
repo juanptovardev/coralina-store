@@ -665,6 +665,34 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   );
 }
 
+type CustomerMatch = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  city: string;
+  address: string;
+};
+
+type PickerOption = { variantId: number; productTitle: string; size: string; label: string; stock: number };
+
+function PickerButton({ o, added, onAdd }: { o: PickerOption; added: boolean; onAdd: () => void }) {
+  return (
+    <button
+      className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--d-panel-2)] disabled:cursor-not-allowed disabled:opacity-40"
+      disabled={o.stock <= 0 || added}
+      title={o.stock <= 0 ? "AGOTADO" : added ? "Ya está en el pedido" : undefined}
+      onClick={onAdd}
+    >
+      <span>
+        {o.label}
+        {added ? " · ya agregado" : ""}
+      </span>
+      <span className="opacity-60">{o.stock <= 0 ? "AGOTADO" : `${o.stock} uds`}</span>
+    </button>
+  );
+}
+
 function ManualOrderModal({
   open,
   onClose,
@@ -684,18 +712,92 @@ function ManualOrderModal({
   const [error, setError] = useState("");
   const { busy, run } = useBusy();
 
+  // Picker con búsqueda (reemplaza el select plano).
+  const [pick, setPick] = useState("");
+  const dpick = useDebouncedValue(pick, 200);
+
+  // Autofill de cliente por email.
+  const [emailSearch, setEmailSearch] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [matches, setMatches] = useState<CustomerMatch[] | null>(null);
+  const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [customerId, setCustomerId] = useState<number | null>(null);
+
   const products = data?.products ?? [];
-  const options = useMemo(
+  const options = useMemo<PickerOption[]>(
     () =>
       products.flatMap((p) =>
         p.variants.map((v) => ({
           variantId: v.id,
+          productTitle: p.title,
+          size: v.size,
           label: `${p.title} · ${v.size}`,
           stock: v.stock,
         })),
       ),
     [products],
   );
+
+  const term = dpick.trim().toLowerCase();
+  const pickerOptions = useMemo(
+    () =>
+      (term
+        ? options.filter((o) => `${o.productTitle} ${o.size}`.toLowerCase().includes(term))
+        : options
+      ).slice(0, 30),
+    [options, term],
+  );
+  // Con la búsqueda vacía: primeras ~30 opciones agrupadas por producto.
+  const groupedOptions = useMemo(() => {
+    const map = new Map<string, PickerOption[]>();
+    for (const o of pickerOptions) {
+      const arr = map.get(o.productTitle) ?? [];
+      arr.push(o);
+      map.set(o.productTitle, arr);
+    }
+    return [...map.entries()];
+  }, [pickerOptions]);
+
+  function addItem(o: PickerOption) {
+    if (items.some((i) => i.variantId === o.variantId)) return;
+    setItems([...items, { variantId: o.variantId, quantity: 1, label: o.label, stock: o.stock }]);
+  }
+
+  async function searchCustomer() {
+    const q = emailSearch.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/admin/customers?q=${encodeURIComponent(q)}`);
+      const json = (await res.json().catch(() => ({}))) as { customers?: CustomerMatch[] };
+      const list = json.customers ?? [];
+      // El server filtra por nombre/correo/teléfono/ciudad: si buscan un
+      // correo, afinamos client-side para mostrar solo matches de email.
+      const byEmail = q.includes("@")
+        ? list.filter((c) => c.email.toLowerCase().includes(q.toLowerCase()))
+        : list;
+      setMatches(byEmail.slice(0, 5));
+      setIsNewCustomer(byEmail.length === 0);
+    } catch {
+      setMatches([]);
+      setIsNewCustomer(true);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function pickCustomer(m: CustomerMatch) {
+    setCustomer({
+      name: m.name ?? "",
+      email: m.email ?? "",
+      phone: m.phone ?? "",
+      city: m.city ?? "",
+      address: m.address ?? "",
+    });
+    setCustomerId(m.id);
+    setMatches(null);
+    setIsNewCustomer(false);
+  }
 
   // Éxito: { ok:true, ...totals }. Fallo: { ok:false, error } (HTTP 4xx) o
   // error de red. Se pinta por shape; sin subtotal numérico se muestra `error`.
@@ -735,11 +837,58 @@ function ManualOrderModal({
     });
   }, [items]);
 
+  // Guardas de creación: nada puede exceder el stock y el preview debe estar sano.
+  const overstock = items.filter((i) => i.quantity > i.stock);
+  const createBlocked = overstock.length > 0 || Boolean(previewError);
+
   return (
     <Modal open={open} onClose={onClose} title="Nuevo pedido manual" wide>
       <div className="grid gap-5 text-sm md:grid-cols-2">
         <div className="space-y-3">
-          <p className="admin-label">Cliente</p>
+          <p className="admin-label">Email del cliente</p>
+          <div className="flex gap-2">
+            <input
+              className="admin-input"
+              placeholder="correo@cliente.com"
+              value={emailSearch}
+              onChange={(e) => {
+                setEmailSearch(e.target.value);
+                setMatches(null);
+                setIsNewCustomer(false);
+              }}
+              onBlur={() => {
+                if (emailSearch.trim()) void searchCustomer();
+              }}
+            />
+            <button
+              className="dash-btn shrink-0 text-xs"
+              disabled={searching || !emailSearch.trim()}
+              onClick={() => void searchCustomer()}
+            >
+              Buscar
+            </button>
+          </div>
+          {searching && <p className="text-xs opacity-60">Buscando…</p>}
+          {matches && matches.length > 0 && (
+            <ul className="card-soft mt-1 max-h-32 space-y-1 overflow-y-auto p-1.5 text-xs">
+              {matches.map((m) => (
+                <li key={m.id}>
+                  <button
+                    className="w-full rounded px-1.5 py-1 text-left hover:bg-[var(--d-panel-2)]"
+                    onClick={() => pickCustomer(m)}
+                  >
+                    {m.name || "(sin nombre)"} · {m.email}
+                    {m.city ? ` · ${m.city}` : ""}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {isNewCustomer && (
+            <p className="mt-1 text-xs text-[#8a5a12]">Cliente nuevo: se creará al guardar.</p>
+          )}
+
+          <p className="admin-label mt-3">Datos del cliente</p>
           {(["name", "email", "phone", "city", "address"] as const).map((k) => (
             <input
               key={k}
@@ -748,7 +897,12 @@ function ManualOrderModal({
                 k === "name" ? "Nombre" : k === "email" ? "Correo" : k === "phone" ? "WhatsApp" : k === "city" ? "Ciudad" : "Dirección"
               }
               value={customer[k]}
-              onChange={(e) => setCustomer({ ...customer, [k]: e.target.value })}
+              onChange={(e) => {
+                // Si el email cambia a mano, la relación con el cliente
+                // autocompletado deja de ser válida.
+                if (k === "email") setCustomerId(null);
+                setCustomer({ ...customer, [k]: e.target.value });
+              }}
             />
           ))}
           <p className="text-[0.68rem] opacity-55">
@@ -784,23 +938,40 @@ function ManualOrderModal({
 
         <div className="space-y-3">
           <p className="admin-label">Productos</p>
-          <select
+          <input
             className="admin-input"
-            value=""
-            onChange={(e) => {
-              const opt = options.find((o) => o.variantId === Number(e.target.value));
-              if (!opt) return;
-              if (items.some((i) => i.variantId === opt.variantId)) return;
-              setItems([...items, { ...opt, quantity: 1 }]);
-            }}
-          >
-            <option value="">Añadir producto…</option>
-            {options.map((o) => (
-              <option key={o.variantId} value={o.variantId} disabled={o.stock <= 0}>
-                {o.label} {o.stock <= 0 ? "· AGOTADO" : `· ${o.stock} uds`}
-              </option>
-            ))}
-          </select>
+            placeholder="Buscar producto o talla…"
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+          />
+          <div className="dash-panel max-h-56 overflow-y-auto scroll-thin p-1">
+            {pickerOptions.length === 0 ? (
+              <p className="p-2 text-xs opacity-60">Sin resultados para «{pick}».</p>
+            ) : term ? (
+              pickerOptions.map((o) => (
+                <PickerButton
+                  key={o.variantId}
+                  o={o}
+                  added={items.some((i) => i.variantId === o.variantId)}
+                  onAdd={() => addItem(o)}
+                />
+              ))
+            ) : (
+              groupedOptions.map(([productTitle, opts]) => (
+                <div key={productTitle} className="mb-1">
+                  <p className="px-2 py-1 text-[0.66rem] uppercase tracking-wide opacity-50">{productTitle}</p>
+                  {opts.map((o) => (
+                    <PickerButton
+                      key={o.variantId}
+                      o={o}
+                      added={items.some((i) => i.variantId === o.variantId)}
+                      onAdd={() => addItem(o)}
+                    />
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
 
           <ul className="space-y-2">
             {items.map((i) => (
@@ -812,13 +983,12 @@ function ManualOrderModal({
                   max={i.stock}
                   className="admin-input max-w-[4.5rem] py-1"
                   value={i.quantity}
-                  onChange={(e) =>
-                    setItems(
-                      items.map((x) =>
-                        x.variantId === i.variantId ? { ...x, quantity: Number(e.target.value) } : x,
-                      ),
-                    )
-                  }
+                  onChange={(e) => {
+                    // Clamp: entero, mínimo 1, máximo el stock de la variante.
+                    const parsed = Number.parseInt(e.target.value, 10);
+                    const q = Number.isNaN(parsed) ? 1 : Math.min(Math.max(parsed, 1), i.stock || 1);
+                    setItems(items.map((x) => (x.variantId === i.variantId ? { ...x, quantity: q } : x)));
+                  }}
                 />
                 {i.quantity > i.stock && <span className="text-[var(--d-danger)]">sin stock</span>}
                 <button className="text-[var(--d-danger)]" onClick={() => setItems(items.filter((x) => x.variantId !== i.variantId))}>
@@ -837,15 +1007,12 @@ function ManualOrderModal({
               <Row label="Total" value={formatCOP(totals.totalCents)} bold />
             </div>
           )}
-          {!totals && previewError && (
-            <p className="text-xs text-[var(--d-danger)]">{previewError}</p>
-          )}
 
           {error && <p className="text-xs text-[var(--d-danger)]">{error}</p>}
 
           <button
             className="dash-btn dash-btn-primary w-full"
-            disabled={busy}
+            disabled={busy || createBlocked}
             onClick={() =>
               run(async () => {
                 setError("");
@@ -853,6 +1020,7 @@ function ManualOrderModal({
                   "/api/admin/orders",
                   {
                     action: "create_manual",
+                    customerId: customerId ?? undefined,
                     customer,
                     items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
                     fulfillmentClass: cls,
@@ -866,12 +1034,19 @@ function ManualOrderModal({
                 }
                 setItems([]);
                 setCustomer({ name: "", email: "", phone: "", city: "", address: "" });
+                setCustomerId(null);
                 onDone(`Pedido ${json.displayId} creado`, "ok");
               })
             }
           >
             Crear pedido
           </button>
+          {overstock.length > 0 && (
+            <p className="text-xs text-[var(--d-danger)]">
+              Hay cantidades que superan el stock disponible: {overstock.map((o) => o.label).join(", ")}.
+            </p>
+          )}
+          {previewError && <p className="text-xs text-[var(--d-danger)]">{previewError}</p>}
         </div>
       </div>
     </Modal>

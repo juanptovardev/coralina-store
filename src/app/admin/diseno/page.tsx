@@ -14,6 +14,7 @@ import {
   postJson,
 } from "@/components/admin/ui";
 import { LayoutZoneGuide } from "@/components/admin/LayoutZoneGuide";
+import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { HomeRenderer, type HomeCategory, type HomeProduct } from "@/components/storefront/HomeRenderer";
 import { StoreProvider } from "@/components/storefront/shop";
 import { BANNER_IMAGES, BANNER_RATIO_MAX, BANNER_RATIO_MIN, LAYOUT_PLANE, TOKEN_LABELS, type LayoutMode } from "@/lib/constants";
@@ -203,6 +204,11 @@ export default function DisenoPage() {
                   className="admin-input"
                   value={readBanner(draft.banner).image}
                   onChange={(e) => setDraft({ ...draft, banner: { ...draft.banner, imageUrl: e.target.value } })}
+                />
+                <ImageUploadField
+                  className="mt-2"
+                  allowUrl={false}
+                  onUploaded={(url) => setDraft({ ...draft, banner: { ...draft.banner, imageUrl: url } })}
                 />
                 <div className="mt-2 flex flex-wrap gap-1">
                   {(Object.keys(BANNER_IMAGES) as LayoutMode[]).map((m) => (
