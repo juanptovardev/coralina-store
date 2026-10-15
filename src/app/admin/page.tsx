@@ -27,7 +27,11 @@ export default async function AdminHome() {
   const now = Date.now();
   const hourAgo = (h: number) => new Date(now - h * 3600 * 1000);
   const lowStock = stock.reduce((a, s) => a + s.lowCount, 0);
-  const plane = LAYOUT_PLANE[layout.mode as LayoutMode] ?? LAYOUT_PLANE.preset_left;
+  // Sin filas en home_layouts (base recién vaciada) getActiveLayout devuelve
+  // undefined: todo acceso a layout.* debe tolerarlo o el dashboard revienta
+  // con el error boundary ("La consola tuvo un problema").
+  const hasLayout = Boolean(layout);
+  const plane = LAYOUT_PLANE[layout?.mode as LayoutMode] ?? LAYOUT_PLANE.preset_left;
   const inRevision = board.filter((s) => s.status === "revision").length;
   const activeBoard = board.filter((s) => s.status !== "archivado").length;
   const byTag = metrics.byTag;
@@ -176,24 +180,43 @@ export default async function AdminHome() {
 
         {/* ---------- home activo ---------- */}
         <div className="dash-panel overflow-hidden">
-          <div className="border-b border-[var(--d-line)] px-4 py-3">
-            <p className="dash-label">Home publicado</p>
-            <p className="mt-1 text-sm font-semibold">{layout.name}</p>
-            <p className="text-[0.7rem] text-[var(--d-ink-soft)]">
-              Layout {plane.label} · versión {layout.version}
-            </p>
-          </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={readBanner(layout.banner).image}
-            alt="Banner activo"
-            className="h-32 w-full object-cover"
-          />
-          <div className="space-y-2 p-4">
-            <MiniRow label="Proporción" value={`${readBanner(layout.banner).aspect.toFixed(2)}:1`} />
-            <MiniRow label="Overlay" value={`${Math.round(readBanner(layout.banner).overlay * 100)}%`} />
-            <MiniRow label="Widgets activos" value={Array.isArray(layout.widgets) ? String(layout.widgets.filter((w) => w.enabled).length) : "—"} />
-          </div>
+          {hasLayout ? (
+            <>
+              <div className="border-b border-[var(--d-line)] px-4 py-3">
+                <p className="dash-label">Home publicado</p>
+                <p className="mt-1 text-sm font-semibold">{layout!.name}</p>
+                <p className="text-[0.7rem] text-[var(--d-ink-soft)]">
+                  Layout {plane.label} · versión {layout!.version}
+                </p>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={readBanner(layout!.banner).image}
+                alt="Banner activo"
+                className="h-32 w-full object-cover"
+              />
+              <div className="space-y-2 p-4">
+                <MiniRow label="Proporción" value={`${readBanner(layout!.banner).aspect.toFixed(2)}:1`} />
+                <MiniRow label="Overlay" value={`${Math.round(readBanner(layout!.banner).overlay * 100)}%`} />
+                <MiniRow label="Widgets activos" value={Array.isArray(layout!.widgets) ? String(layout!.widgets.filter((w) => w.enabled).length) : "—"} />
+              </div>
+            </>
+          ) : (
+            <div className="p-4">
+              <p className="dash-label">Home publicado</p>
+              <p className="mt-2 text-sm font-semibold">Todavía no hay un home</p>
+              <p className="mt-1 text-[0.74rem] leading-relaxed text-[var(--d-ink-soft)]">
+                La tienda arranca vacía. Publica el primer diseño para elegir banner, secciones y
+                widgets; mientras tanto la portada usa la vista por defecto.
+              </p>
+              <Link
+                href="/admin/diseno"
+                className="dash-btn dash-btn-primary mt-3 inline-flex items-center gap-2"
+              >
+                Configurar diseño →
+              </Link>
+            </div>
+          )}
         </div>
       </div>
 
