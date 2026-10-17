@@ -3,35 +3,25 @@
 import { useState } from "react";
 import { LogoMark, WaveIcon, SeagullIcon, CoralIcon, StarfishIcon } from "@/components/store/svgs";
 
-type Role = "admin" | "asesor";
-
-// La clave demo solo se muestra/usa fuera de producción (evita embeberla en el bundle).
-const showDemo = process.env.NODE_ENV !== "production";
-
 export default function LoginPage() {
-  const [role, setRole] = useState<Role>("admin");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState(false);
 
-  const doLogin = async (r: Role, p: string) => {
+  const doLogin = async () => {
     setBusy(true);
     setErr(null);
     try {
       const res = await fetch("/api/admin/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // El email solo se envía si el usuario lo escribió (ruta legacy intacta).
-        body: JSON.stringify({
-          role: r,
-          password: p,
-          ...(email.trim() ? { email: email.trim() } : {}),
-        }),
+        // El rol NO se envía: el backend lo deriva de la cuenta (tabla users).
+        body: JSON.stringify({ email: email.trim(), password: pw }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error((data as { error?: string }).error || "No se pudo iniciar sesión");
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; role?: string; error?: string };
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "No se pudo iniciar sesión");
       // Verifica que la cookie de sesión quedó guardada (iframes pueden bloquearla)
       const check = await fetch("/api/admin/session", { credentials: "include", cache: "no-store" })
         .then((x) => x.json())
@@ -40,7 +30,9 @@ export default function LoginPage() {
         setBlocked(true);
         return;
       }
-      window.location.assign("/admin");
+      // Redirige según el rol que deriva el backend desde la cuenta.
+      const dest = data.role === "admin" || data.role === "asesor" ? "/admin" : "/mi-cuenta";
+      window.location.assign(dest);
     } catch (e2) {
       setErr((e2 as Error).message);
     } finally {
@@ -85,7 +77,7 @@ export default function LoginPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void doLogin(role, pw);
+            void doLogin();
           }}
           className="w-full max-w-sm"
         >
@@ -93,7 +85,7 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-ink/55">Usa tu cuenta de equipo.</p>
           <div className="mt-6 space-y-4">
             <div>
-              <label className="label" htmlFor="login-email">Email (opcional)</label>
+              <label className="label" htmlFor="login-email">Email</label>
               <input
                 id="login-email"
                 className="input"
@@ -102,19 +94,8 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="tu@coralina.com"
                 autoComplete="username"
+                autoFocus
               />
-            </div>
-            <div>
-              <label className="label" htmlFor="login-role">Rol</label>
-              <select
-                id="login-role"
-                className="input"
-                value={role}
-                onChange={(e) => setRole(e.target.value as Role)}
-              >
-                <option value="admin">Administrador</option>
-                <option value="asesor">Asesor</option>
-              </select>
             </div>
             <div>
               <label className="label" htmlFor="login-pw">Contraseña</label>
@@ -125,7 +106,7 @@ export default function LoginPage() {
                 value={pw}
                 onChange={(e) => setPw(e.target.value)}
                 placeholder="••••••••"
-                autoFocus
+                autoComplete="current-password"
               />
             </div>
             {err && (
@@ -144,37 +125,6 @@ export default function LoginPage() {
               {busy ? "Entrando…" : "Entrar al portal"}
             </button>
           </div>
-
-          {showDemo && (
-            <div className="mt-8 rounded-xl border border-ink/10 bg-white/60 p-4">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink/45">Accesos de demostración</p>
-              <div className="mt-2 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => void doLogin("admin", "coralina")}
-                  className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
-                >
-                  <span>
-                    <strong>Admin</strong> · control total
-                  </span>
-                  <span className="text-terracotta">usar →</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void doLogin("asesor", "coralina")}
-                  className="flex w-full items-center justify-between rounded-lg border border-ink/10 px-3 py-2 text-left text-xs transition hover:border-terracotta"
-                >
-                  <span>
-                    <strong>Asesor</strong> · sin borrados duros
-                  </span>
-                  <span className="text-terracotta">usar →</span>
-                </button>
-              </div>
-              <p className="mt-2 text-[0.65rem] text-ink/40">
-                Clave por defecto: <code>coralina</code>. El Asesor no puede hard-delete ni purgar auditoría.
-              </p>
-            </div>
-          )}
         </form>
       </div>
     </div>

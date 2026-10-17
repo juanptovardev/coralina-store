@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CoralinaMark } from "@/components/sea";
-import { Modal } from "@/components/admin/ui";
 import type { Actor } from "@/lib/session";
 
 const NAV: { href: string; label: string; icon: ReactNode; group: string }[] = [
@@ -25,49 +24,14 @@ const GROUPS = ["Operación", "Catálogo", "Crecimiento", "Control"];
 
 export function AdminShell({ actor, children }: { actor: Actor; children: ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  const [roleModal, setRoleModal] = useState<"admin" | "asesor" | null>(null);
-  const [rolePassword, setRolePassword] = useState("");
-  const [roleError, setRoleError] = useState("");
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
-  function askRole(role: "admin" | "asesor") {
-    if (role === actor.role) return;
-    setRoleModal(role);
-    setRolePassword("");
-    setRoleError("");
-  }
-
-  async function confirmRole() {
-    if (!roleModal) return;
-    const role = roleModal;
-    setSwitching(true);
-    setRoleError("");
-    try {
-      const res = await fetch("/api/admin/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role, password: role === "admin" ? rolePassword : undefined }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !json.ok) {
-        setRoleError(json.error ?? "No se pudo cambiar el rol.");
-        return;
-      }
-      setRoleModal(null);
-      router.refresh();
-    } catch {
-      setRoleError("Error de red al cambiar el rol.");
-    } finally {
-      setTimeout(() => setSwitching(false), 600);
-    }
-  }
-
+  // El rol de sesión sale de la cuenta logueada (tabla users); NO se cambia con una
+  // clave en caliente. Para operar con otro rol se cierra sesión y se entra con esa cuenta.
   async function logout() {
     try {
       await fetch("/api/admin/session", { method: "DELETE" });
@@ -156,19 +120,8 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
               ? "Borrado definitivo y purga habilitados."
               : "Solo acciones suaves: archivar y cancelar."}
           </p>
-          <div className="mt-2 flex gap-1 rounded-lg bg-white/8 p-1 text-[0.66rem]">
-            {(["admin", "asesor"] as const).map((r) => (
-              <button
-                key={r}
-                disabled={switching}
-                onClick={() => askRole(r)}
-                className={`flex-1 rounded-md px-2 py-1 font-semibold capitalize transition ${
-                  actor.role === r ? "bg-white text-[var(--d-bg)]" : "text-white/60 hover:text-white"
-                }`}
-              >
-                {r}
-              </button>
-            ))}
+          <div className="mt-2 rounded-lg bg-white/8 px-2 py-1 text-center text-[0.66rem] font-semibold capitalize text-white/70">
+            {actor.role}
           </div>
           <button
             onClick={logout}
@@ -178,7 +131,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
           </button>
           <Link
             href="/"
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 hover:border-[var(--d-gold)] hover:text-white"
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 transition hover:border-[var(--d-gold)] hover:text-white"
           >
             ↗ Ver la tienda
           </Link>
@@ -210,46 +163,6 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
         </header>
         <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </div>
-
-      {/* ---------- modal de cambio de rol ---------- */}
-      <Modal
-        open={roleModal !== null}
-        onClose={() => setRoleModal(null)}
-        title="Cambiar rol de sesión"
-        subtitle={roleModal === "admin" ? "Requiere reautenticación con la clave del admin" : "No requiere clave"}
-      >
-        <div className="space-y-4 text-sm">
-          {roleModal === "admin" && (
-            <div>
-              <label className="admin-label">Clave del admin</label>
-              <input
-                type="password"
-                className="admin-input mt-1"
-                value={rolePassword}
-                autoFocus
-                placeholder="••••••••"
-                onChange={(e) => setRolePassword(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && rolePassword && !switching) void confirmRole();
-                }}
-              />
-            </div>
-          )}
-          {roleError && <p className="text-xs text-[var(--d-danger)]">{roleError}</p>}
-          <div className="flex justify-end gap-2">
-            <button className="dash-btn" onClick={() => setRoleModal(null)}>
-              Cancelar
-            </button>
-            <button
-              className="dash-btn dash-btn-primary"
-              disabled={switching || (roleModal === "admin" && !rolePassword)}
-              onClick={() => void confirmRole()}
-            >
-              {switching ? "Cambiando…" : `Cambiar a ${roleModal ?? ""}`}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

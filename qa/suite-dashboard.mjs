@@ -35,8 +35,22 @@ async function req(path, { method = "GET", body, role = "none", cookie } = {}) {
 }
 const g = (p, role = "admin") => req(p, { role });
 const post = (p, body, role = "admin") => req(p, { method: "POST", body, role });
+// Login real por cuenta (T1: email + clave; el rol lo deriva el server).
+// QA local: mismas cuentas que producción, clave "coralina" (override por env).
+const QA_USERS = {
+  admin: {
+    email: process.env.QA_ADMIN_EMAIL ?? "admin@coralina-store.com",
+    password: process.env.QA_ADMIN_PASS ?? "coralina",
+  },
+  asesor: {
+    email: process.env.QA_ASESOR_EMAIL ?? "asesor@coralina-store.com",
+    password: process.env.QA_ASESOR_PASS ?? "coralina",
+  },
+};
 async function login(role) {
-  const r = await req("/api/admin/session", { method: "POST", body: { role, password: ADMIN_PASS } });
+  const u = QA_USERS[role];
+  if (!u) return "";
+  const r = await req("/api/admin/session", { method: "POST", body: { email: u.email, password: u.password } });
   return (r.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 }
 // Detector de error boundary: usamos los textos propios (error.tsx / global-error.tsx)
@@ -53,7 +67,7 @@ async function run() {
   try {
     console.log(`\n=== QA DASHBOARD v6 \u2014 ${BASE} ===`);
 
-    // Cookies reales vía login (firmadas o planas según el modo del server).
+    // (QA_USERS vive a nivel top-level; el login real por cuenta va allá).
     jar.admin = await login("admin");
     jar.asesor = await login("asesor");
 
@@ -74,10 +88,21 @@ async function run() {
     ok("GET /api/admin/session cookie basura \u2192 role:null", sesGarbage.json?.role === null, http(sesGarbage));
     const adminNoCookie = await req("/admin", { role: "none" });
     ok("GET /admin sin cookie \u2192 redirige (3xx)", adminNoCookie.status >= 300 && adminNoCookie.status < 400, http(adminNoCookie));
+    // Contrato T1 (auth email-only): el rol NUNCA viene del body y no existe
+    // ruta legacy con clave compartida. Sin email => 401 "Credenciales
+    // inválidas." (antes: 400 "Rol inválido." por el campo role del body).
     const badRole = await post("/api/admin/session", { role: "bogus" }, "none");
-    ok("POST /api/admin/session rol inv\u00e1lido \u2192 400", badRole.status === 400, http(badRole));
-    const adminNoPass = await post("/api/admin/session", { role: "admin" }, "none");
-    ok("POST /api/admin/session admin sin clave \u2192 401", adminNoPass.status === 401, http(adminNoPass));
+    ok(
+      "POST /api/admin/session sin el campo role (válido) sigue rechazado: sin email -> 401",
+      badRole.status === 401,
+      http(badRole),
+    );
+    const badEmail = await post("/api/admin/session", { email: "no-existe@coralina-store.com", password: "x" }, "none");
+    ok(
+      "POST /api/admin/session con email inexistente -> 401 credenciales inválidas",
+      badEmail.status === 401 && /credenciales/i.test(badEmail.text ?? ""),
+      http(badEmail),
+    );
     const sesDel = await req("/api/admin/session", { method: "DELETE", role: "admin" });
     ok("DELETE /api/admin/session \u2192 200 { ok:true }", sesDel.status === 200 && sesDel.json?.ok === true, http(sesDel));
     const delCookies = sesDel.headers.getSetCookie?.() ?? [sesDel.headers.get("set-cookie") ?? ""];

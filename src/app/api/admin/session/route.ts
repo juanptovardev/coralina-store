@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { passwordMatches } from "@/lib/admin-auth";
 import { getActor, actorForRole, type Actor } from "@/lib/session";
 import { clientIp, rateLimit, RATE_LIMIT_ERROR, RATE_LIMIT_RETRY_AFTER } from "@/lib/rate-limit";
+import { checkLoginThrottle, registerLoginFailure, clearLoginThrottle } from "@/lib/login-throttle";
 import { decodeRole, encodeRole } from "@/lib/session-sign";
 import { findUserByEmail, checkEmailLogin } from "@/lib/users";
 import { recordAudit } from "@/lib/audit";
@@ -20,54 +20,53 @@ export async function GET() {
 
 export async function POST(req: Request) {
   // Boundary sensible (credencial): limita el brute-force aunque esté exento del gate admin.
-  if (!rateLimit(clientIp(req))) {
+  const ip = clientIp(req);
+  if (!rateLimit(ip)) {
     return NextResponse.json(
       { ok: false, error: RATE_LIMIT_ERROR },
       { status: 429, headers: { "Retry-After": RATE_LIMIT_RETRY_AFTER } },
     );
   }
   const body = (await req.json().catch(() => null)) as
-    | { role?: string; email?: string; password?: string }
+    | { email?: string; password?: string }
     | null;
-  if (!body || (body.role !== "asesor" && body.role !== "admin")) {
-    return NextResponse.json({ ok: false, error: "Rol inválido." }, { status: 400 });
+  // El rol NUNCA viene del body. Sin email no hay sesión: mismo 401 que la clave
+  // inválida para no filtrar qué falló.
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (email === "") {
+    return NextResponse.json({ ok: false, error: "Credenciales inválidas." }, { status: 401 });
   }
-  const role = body.role;
 
-  // Login por usuario: si viene email no vacío se valida contra la tabla users
-  // (hash scrypt) exigiendo que el rol de la cuenta coincida con el pedido.
-  // Mismo mensaje 401 para email desconocido, clave incorrecta, rol distinto o
-  // error de DB (fail-closed) — y checkEmailLogin quema scrypt en todos los
-  // caminos, así que el timing tampoco filtra cuál falló.
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  let actor: Actor;
-  let user: Awaited<ReturnType<typeof findUserByEmail>> = null;
-  if (email !== "") {
-    try {
-      user = await findUserByEmail(email);
-    } catch (e) {
-      // DB caída → user queda null; checkEmailLogin quema scrypt igual
-      // (timing uniforme) y deniega. Nunca 500 con stack.
-      console.error("[session] lookup de usuario falló:", e);
-    }
-    if (!(await checkEmailLogin(user, body.password ?? "", role))) {
-      return NextResponse.json({ ok: false, error: "Credenciales inválidas." }, { status: 401 });
-    }
-    actor = {
-      role,
-      name: user!.name,
-      canHardDelete: role === "admin",
-      canPurgeAudit: role === "admin",
-    };
-  } else {
-    // Ruta legacy (clave compartida): emite sesión sin email. Ambos roles exigen
-    // la clave: emitir una cookie de sesión desbloquea TODO /api/admin/* vía el
-    // gate, así que no se emite sin credencial (evita puerta trasera).
-    if (!passwordMatches(body.password)) {
-      return NextResponse.json({ ok: false, error: "Reautenticación fallida." }, { status: 401 });
-    }
-    actor = actorForRole(role);
+  // Throttle por cuenta (email|ip): 6+ fallos en 15 min → 429 antes de tocar scrypt.
+  const throttleKey = `${email}|${ip}`;
+  const throttle = checkLoginThrottle(throttleKey);
+  if (throttle.blocked) {
+    return NextResponse.json(
+      { ok: false, error: RATE_LIMIT_ERROR },
+      { status: 429, headers: { "Retry-After": String(throttle.retryAfterSeconds) } },
+    );
   }
+
+  // Login contra la tabla users (hash scrypt). Mismo 401 para email desconocido,
+  // clave incorrecta o error de DB (fail-closed): checkEmailLogin quema scrypt en
+  // todos los caminos, así que el timing tampoco filtra cuál falló.
+  let user: Awaited<ReturnType<typeof findUserByEmail>> = null;
+  try {
+    user = await findUserByEmail(email);
+  } catch (e) {
+    // DB caída → user queda null; checkEmailLogin quema scrypt igual
+    // (timing uniforme) y deniega. Nunca 500 con stack.
+    console.error("[session] lookup de usuario falló:", e);
+  }
+  if (!(await checkEmailLogin(user, body?.password ?? ""))) {
+    registerLoginFailure(throttleKey);
+    return NextResponse.json({ ok: false, error: "Credenciales inválidas." }, { status: 401 });
+  }
+
+  // El rol se deriva SIEMPRE de la fila users (nunca del body ni por clave compartida).
+  const role = user!.role;
+  const actor: Actor = actorForRole(role);
+  clearLoginThrottle(throttleKey);
 
   const store = await cookies();
   // En producción se firma la cookie (HMAC) para que no sea falsificable.

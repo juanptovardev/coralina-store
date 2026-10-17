@@ -52,14 +52,17 @@ export async function findUserByEmail(email: string): Promise<DbUser | null> {
 
 /**
  * Verificación de login por email, timing-uniforme: TODOS los caminos (email
- * desconocido, rol distinto, clave incorrecta) ejecutan scrypt exactamente una
- * vez, de modo que la respuesta no filtra por latencia cuál falló. Nunca lanza
- * (fail-closed → false).
+ * desconocido, clave incorrecta) ejecutan scrypt exactamente una vez, de modo que
+ * la respuesta no filtra por latencia cuál falló. Nunca lanza (fail-closed → false).
+ *
+ * El ROL ya no se decide aquí: quien entra lo determina la fila users y el endpoint
+ * deriva el rol de user.role (nunca del body). `expectedRole` queda opcional sólo
+ * por compatibilidad; el flujo de login llama a esta función sin ese argumento.
  */
 export async function checkEmailLogin(
   user: DbUser | null,
   password: string,
-  expectedRole: string,
+  expectedRole?: string,
 ): Promise<boolean> {
   try {
     if (!user) {
@@ -67,7 +70,7 @@ export async function checkEmailLogin(
       return false;
     }
     const pwOk = await verifyPassword(password, user.passwordHash);
-    return pwOk && user.role === expectedRole;
+    return pwOk && (expectedRole === undefined || user.role === expectedRole);
   } catch {
     return false;
   }
