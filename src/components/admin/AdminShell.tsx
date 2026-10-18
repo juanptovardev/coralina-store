@@ -17,6 +17,7 @@ const NAV: { href: string; label: string; icon: ReactNode; group: string }[] = [
   { href: "/admin/promos", label: "Promos y combos", group: "Crecimiento", icon: <IconPercent /> },
   { href: "/admin/diseno", label: "Diseño del home", group: "Crecimiento", icon: <IconLayout /> },
 
+  { href: "/admin/usuarios", label: "Personas", group: "Control", icon: <IconUsers /> },
   { href: "/admin/auditoria", label: "Auditoría", group: "Control", icon: <IconShield /> },
 ];
 

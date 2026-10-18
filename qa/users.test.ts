@@ -60,6 +60,8 @@ const fakeUser: DbUser = {
   passwordHash: await hashPassword("clave-ok"),
   name: "Sofía (Test)",
   role: "admin",
+  active: true,
+  lastLoginAt: null,
   createdAt: new Date(),
 };
 ok("usuario + clave correcta + rol correcto → true", (await checkEmailLogin(fakeUser, "clave-ok", "admin")) === true);

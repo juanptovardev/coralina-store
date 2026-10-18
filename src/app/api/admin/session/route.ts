@@ -4,7 +4,8 @@ import { getActor, actorForRole, type Actor } from "@/lib/session";
 import { clientIp, rateLimit, RATE_LIMIT_ERROR, RATE_LIMIT_RETRY_AFTER } from "@/lib/rate-limit";
 import { checkLoginThrottle, registerLoginFailure, clearLoginThrottle } from "@/lib/login-throttle";
 import { decodeRole, encodeRole } from "@/lib/session-sign";
-import { findUserByEmail, checkEmailLogin } from "@/lib/users";
+import { findUserByEmail, checkEmailLogin, touchLastLogin } from "@/lib/users";
+import { encodeSessionIdentity } from "@/lib/session-role";
 import { recordAudit } from "@/lib/audit";
 export async function GET() {
   // Sin cookie de rol VÁLIDA devolvemos role:null. getActor() es fail-closed
@@ -66,6 +67,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Credenciales inválidas." }, { status: 401 });
   }
 
+  // Cuenta desactivada (T4): mismo 401 genérico, sin filtrar que existe pero está off.
+  if (!user!.active) {
+    return NextResponse.json({ ok: false, error: "Credenciales inválidas." }, { status: 401 });
+  }
+
   // El rol se deriva SIEMPRE de la fila users (nunca del body ni por clave compartida).
   const role = user!.role;
   const actor: Actor = actorForRole(role);
@@ -74,13 +80,21 @@ export async function POST(req: Request) {
   const store = await cookies();
   // En producción se firma la cookie (HMAC) para que no sea falsificable.
   const value = await encodeRole(role);
-  store.set("coralina_role", value, {
+  const cookieAttrs = {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
-  });
+  };
+  store.set("coralina_role", value, cookieAttrs);
+  // Identidad firmada del actor (email): la usa /api/admin/users para los guards
+  // de "no puedo quitarme/borrarme a mí mismo". Mismos atributos que el rol.
+  store.set("coralina_identity", await encodeSessionIdentity(user!.email), cookieAttrs);
+
+  // Best-effort: registrar el último login. No rompe el login si la DB falla.
+  await touchLastLogin(user!.id);
+
   // Auditoría best-effort: la cookie ya está emitida; un fallo de DB de auditoría
   // no debe convertir un login exitoso en error visible.
   try {
@@ -108,13 +122,16 @@ export async function DELETE() {
   } catch {
     actor = null;
   }
-  store.set("coralina_role", "", {
+  const cleared = {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 0,
-  });
+  };
+  store.set("coralina_role", "", cleared);
+  // La identidad firmada (email) se limpia con el mismo alcance que el rol.
+  store.set("coralina_identity", "", cleared);
   if (actor) {
     try {
       await recordAudit({

@@ -51,6 +51,18 @@ export async function findUserByEmail(email: string): Promise<DbUser | null> {
 }
 
 /**
+ * Best-effort: marca el último login. No lanza nunca: en el login la cookie ya
+ * está emitida y un fallo de esta marca no debe convertirlo en error visible.
+ */
+export async function touchLastLogin(userId: number): Promise<void> {
+  try {
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
+  } catch (e) {
+    console.error("[users] registrar last_login_at falló:", e);
+  }
+}
+
+/**
  * Verificación de login por email, timing-uniforme: TODOS los caminos (email
  * desconocido, clave incorrecta) ejecutan scrypt exactamente una vez, de modo que
  * la respuesta no filtra por latencia cuál falló. Nunca lanza (fail-closed → false).

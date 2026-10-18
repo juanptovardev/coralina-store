@@ -335,5 +335,9 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   name: text("name").notNull(),
   role: text("role").$type<"admin" | "asesor" | "cliente">().notNull(),
+  // Estado de la cuenta (T4): false = desactivada, no puede entrar al panel.
+  active: boolean("active").notNull().default(true),
+  // Último login exitoso (T4). Best-effort: null mientras nunca haya entrado.
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
