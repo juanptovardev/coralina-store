@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { decodeRole } from "./session-sign";
 
-export type Role = "admin" | "asesor";
+export type Role = "admin" | "asesor" | "cliente";
 
 export type Actor = {
   role: Role;
@@ -13,6 +13,7 @@ export type Actor = {
 const NAMES: Record<Role, string> = {
   admin: "Sofía Marín (Admin)",
   asesor: "Juan Pérez (Asesor)",
+  cliente: "Cliente",
 };
 
 export async function getActor(): Promise<Actor> {
@@ -20,6 +21,9 @@ export async function getActor(): Promise<Actor> {
   const raw = store.get("coralina_role")?.value;
   // Prod: la cookie va firmada (HMAC). Dev/QA: se acepta el valor plano.
   const decoded = await decodeRole(raw);
+  // Sigue estricto admin|asesor: "cliente" (T2) queda fuera de getActor a propósito
+  // (defensa en profundidad de /api/admin/*). El panel de cliente valida su sesión
+  // con getSessionRole (session-role.ts), no con getActor.
   if (decoded !== "admin" && decoded !== "asesor") {
     throw new ForbiddenError("Sesión inválida o ausente.");
   }

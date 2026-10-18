@@ -14,7 +14,10 @@ export async function GET() {
   // Allowlist del rol (no truthiness): un cookie basura no debe verse como sesión.
   // Este guard debe quedarse: getActor() lanzaría ForbiddenError (500 sin capturar)
   // si el rol no es válido, en vez de devolver { role: null }.
-  if (role !== "admin" && role !== "asesor") return NextResponse.json({ role: null });
+  if (role !== "admin" && role !== "asesor" && role !== "cliente") return NextResponse.json({ role: null });
+  // getActor() sigue estricto admin|asesor (defensa en profundidad de /api/admin/*):
+  // el cliente solo necesita confirmar que su sesión (T2) es válida.
+  if (role === "cliente") return NextResponse.json({ role: "cliente" });
   return NextResponse.json(await getActor());
 }
 

@@ -10,9 +10,9 @@ export default async function MiCuentaPage() {
   if (role === null) redirect("/login");
   if (role === "admin" || role === "asesor") redirect("/admin");
 
-  // Rama reservada para roles futuros (p.j. "cliente"). Hoy getSessionRole sólo
-  // expone admin|asesor|null, así que este bloque es a futuro. La cookie guarda
-  // sólo el rol (no el email), así que mostramos el rol.
+  // Roles no-admin (p. ej. "cliente", T2) se quedan en este panel; admin/asesor
+  // siguen yendo al panel de operaciones. La cookie guarda sólo el rol (no el
+  // email), así que mostramos el rol.
   const raw = role as string;
   const roleLabel = raw === "admin" ? "Administrador" : raw === "asesor" ? "Asesor" : "Cliente";
 

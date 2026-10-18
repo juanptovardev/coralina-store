@@ -26,7 +26,7 @@ export default function LoginPage() {
       const check = await fetch("/api/admin/session", { credentials: "include", cache: "no-store" })
         .then((x) => x.json())
         .catch(() => ({}));
-      if (check.role !== "admin" && check.role !== "asesor") {
+      if (check.role !== "admin" && check.role !== "asesor" && check.role !== "cliente") {
         setBlocked(true);
         return;
       }
@@ -125,6 +125,12 @@ export default function LoginPage() {
               {busy ? "Entrando…" : "Entrar al portal"}
             </button>
           </div>
+          <p className="mt-6 text-center text-sm text-ink/55">
+            ¿No tienes cuenta?{" "}
+            <a href="/register" className="font-medium text-ink underline-offset-2 hover:underline">
+              Regístrate
+            </a>
+          </p>
         </form>
       </div>
     </div>

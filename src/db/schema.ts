@@ -297,7 +297,7 @@ export const auditLog = pgTable(
   {
     id: serial("id").primaryKey(),
     actorName: text("actor_name").notNull(),
-    actorRole: text("actor_role").$type<"admin" | "asesor" | "system">().notNull(),
+    actorRole: text("actor_role").$type<"admin" | "asesor" | "cliente" | "system">().notNull(),
     module: text("module").notNull(),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").default("").notNull(),
@@ -334,6 +334,6 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   name: text("name").notNull(),
-  role: text("role").$type<"admin" | "asesor">().notNull(),
+  role: text("role").$type<"admin" | "asesor" | "cliente">().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });

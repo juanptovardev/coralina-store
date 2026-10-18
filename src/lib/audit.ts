@@ -20,7 +20,8 @@ export type AuditInput = {
     | "devolucion"
     | "set_tracking"
     | "purge_orphans"
-    | "bulk_stock";
+    | "bulk_stock"
+    | "register";
   fieldChanged?: string;
   oldValue?: unknown;
   newValue?: unknown;
