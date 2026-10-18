@@ -20,6 +20,18 @@ export type ValidateRegisterResult =
 // Formato básico local@dominio.tld (el email ya viene normalizado: trim+lowercase).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Regla única de contraseña (registro y cambio de clave). No recorta: el espacio
+ * es un carácter válido del secreto. Devuelve el mensaje de error o null.
+ */
+export function validatePassword(password: unknown): string | null {
+  const value = typeof password === "string" ? password : "";
+  if (value.length < 8 || value.length > 128) {
+    return "La contraseña debe tener entre 8 y 128 caracteres.";
+  }
+  return null;
+}
+
 export function validateRegistration(input: RegisterInput): ValidateRegisterResult {
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
@@ -32,8 +44,9 @@ export function validateRegistration(input: RegisterInput): ValidateRegisterResu
   if (email.length === 0 || email.length > 254 || !EMAIL_RE.test(email)) {
     return { ok: false, error: "Ingresa un email válido." };
   }
-  if (password.length < 8 || password.length > 128) {
-    return { ok: false, error: "La contraseña debe tener entre 8 y 128 caracteres." };
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return { ok: false, error: passwordError };
   }
   return { ok: true, data: { name, email, password } };
 }

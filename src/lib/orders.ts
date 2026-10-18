@@ -1,6 +1,5 @@
 import { db } from "@/db";
 import {
-  customers,
   inventoryLevels,
   orderItems,
   orders,
@@ -13,6 +12,7 @@ import {
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { canChangeTag } from "./domain";
 import { recordAudit } from "./audit";
+import { upsertCustomerByEmail } from "./customers";
 import { evaluateCart, type CartLine } from "./promo";
 import type { Actor } from "./session";
 
@@ -122,31 +122,9 @@ export async function createOrder(
 
   let customerId = input.customerId;
   if (!customerId && input.customer) {
-    // Upsert atómico por email (índice único customers_email_uniq): dos envíos
-    // concurrentes del mismo email no crean filas duplicadas.
-    const email = input.customer.email.trim().toLowerCase();
-    const [c] = await db
-      .insert(customers)
-      .values({
-        name: input.customer.name,
-        email,
-        phone: input.customer.phone ?? "",
-        city: input.customer.city ?? "",
-        address: input.customer.address ?? "",
-      })
-      .onConflictDoUpdate({
-        target: customers.email,
-        // Solo sobrescribe lo enviado; los campos omitidos conservan el valor
-        // previo (no se borran datos de contacto con un vacío).
-        set: {
-          name: input.customer.name,
-          phone: input.customer.phone ? input.customer.phone : sql`${customers.phone}`,
-          city: input.customer.city ? input.customer.city : sql`${customers.city}`,
-          address: input.customer.address ? input.customer.address : sql`${customers.address}`,
-        },
-      })
-      .returning({ id: customers.id });
-    customerId = c.id;
+    // Upsert atómico compartido con el perfil de /mi-cuenta. En checkout los
+    // campos vacíos conservan el valor previo (no se borran datos de contacto).
+    customerId = await upsertCustomerByEmail(input.customer);
   }
   if (!customerId) return { ok: false, error: "Falta el cliente del pedido." };
 
