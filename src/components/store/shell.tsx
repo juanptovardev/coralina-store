@@ -12,7 +12,8 @@ import {
 } from "@/db/schema";
 import { asc, eq, sql } from "drizzle-orm";
 import { StoreProvider, Header, type CatalogProduct, type Theme } from "./shop";
-import { LogoMark, WaveIcon, SeagullIcon, CoralIcon } from "./svgs";
+import { LogoMark } from "./svgs";
+import { formatCOP, FREE_SHIPPING_CENTS } from "@/lib/constants";
 import type { PromoLike } from "@/lib/domain";
 
 const ICON_BY_SLUG: Record<string, string> = {
@@ -256,14 +257,8 @@ function Footer({ categories }: { categories: { name: string; slug: string }[] }
             <span className="font-display text-2xl italic font-semibold">Coralina</span>
           </div>
           <p className="mt-3 max-w-sm text-sm font-light leading-relaxed text-linen/70">
-            Swimwear de corte limpio y colores de atardecer. Diseñado en Santiago, tejido en Chile,
-            probado en el Pacífico Sur.
+            Swimwear de corte limpio y colores de atardecer. Diseñado y confeccionado en Colombia.
           </p>
-          <div className="mt-5 flex items-center gap-4 text-linen/60">
-            <a href="#" aria-label="Instagram" className="transition hover:text-amber-brand"><SeagullIcon className="h-5 w-5" /></a>
-            <a href="#" aria-label="TikTok" className="transition hover:text-amber-brand"><WaveIcon className="h-5 w-5" /></a>
-            <a href="#" aria-label="Pinterest" className="transition hover:text-amber-brand"><CoralIcon className="h-5 w-5" /></a>
-          </div>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-brand">Tienda</p>
@@ -279,15 +274,14 @@ function Footer({ categories }: { categories: { name: string; slug: string }[] }
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-brand">Ayuda</p>
           <ul className="mt-3 space-y-2 text-sm font-light text-linen/75">
-            <li>Guía de tallas</li>
-            <li>Envíos y entregas</li>
-            <li>Cambios por 30 días</li>
+            <li>Despacho de 24 a 48 h hábiles en Colombia</li>
+            <li>Envío gratis desde {formatCOP(FREE_SHIPPING_CENTS)}</li>
             <li><Link className="hover:text-linen" href="/admin">Portal del equipo</Link></li>
           </ul>
         </div>
       </div>
       <div className="border-t border-linen/10 py-5 text-center text-xs font-light text-linen/40">
-        © 2026 Coralina · Hecho con sal y sol en Chile · Precios incluyen IVA
+        © 2026 Coralina · Hecho en Colombia · Precios incluyen IVA
       </div>
     </footer>
   );

@@ -145,11 +145,7 @@ export function Banner({ layout, previewLabel }: { layout: LayoutRow; previewLab
                   </a>
                 )}
               </div>
-              {/* Social proof */}
-              <div className={cn("mt-1 flex items-center gap-2 text-xs", light ? "text-linen/80" : "text-ink/70", isCenter && "md:justify-center", isRight && "md:justify-end")}>
-                <span className="tracking-[0.15em] text-amber-brand">★★★★★</span>
-                <span><strong>4,9</strong> · +2.300 clientas en Chile</span>
-              </div>
+
             </div>
           </div>
         </div>

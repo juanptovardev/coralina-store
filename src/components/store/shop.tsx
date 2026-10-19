@@ -268,9 +268,9 @@ export function StoreProvider({
 /* --------------------------------- Header --------------------------------- */
 
 const ANNOUNCEMENTS = [
-  "Combo Marea: 1 top + 1 panty = −15% automático",
-  "Envío gratis desde $30.000 a todo Chile",
-  "Cambio fácil por 30 días · etiqueta de retorno incluida",
+  `Envío gratis desde ${formatCOP(FREE_SHIPPING_CENTS)} en Colombia`,
+  "Pago con referencia segura",
+  "Hecho en Colombia",
 ];
 
 export function Header({ categories }: { categories: { name: string; slug: string }[] }) {
@@ -363,11 +363,6 @@ export function Header({ categories }: { categories: { name: string; slug: strin
                 </Link>
               ))}
             </nav>
-            <div className="mx-4 rounded-2xl bg-sand/50 p-4 text-xs text-ink/70">
-              <StarfishIcon className="h-5 w-5 text-terracotta" />
-              <p className="mt-2 font-semibold">Combo Marea −15%</p>
-              <p>1 top + 1 panty, se aplica solo en el carrito.</p>
-            </div>
             <Link onClick={() => setMenu(false)} href="/admin" className="btn-ghost mx-4 mt-auto mb-6 text-ink/70">Portal del equipo</Link>
           </aside>
         </div>
