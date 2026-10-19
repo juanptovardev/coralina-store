@@ -199,7 +199,7 @@ export default function AuditoriaPage() {
           <ul className="mt-2 space-y-1 text-xs opacity-75">
             {data?.purges.map((p) => (
               <li key={p.id}>
-                · {new Date(p.createdAt).toLocaleString("es-CO")} — {p.actorName} purgó {p.deletedCount}{" "}
+                · {new Date(p.createdAt).toLocaleString("es-CO")}: {p.actorName} purgó {p.deletedCount}{" "}
                 registros del mes {p.month}
               </li>
             ))}

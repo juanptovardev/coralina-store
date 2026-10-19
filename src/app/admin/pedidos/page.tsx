@@ -576,12 +576,12 @@ export default function PedidosPage() {
               <ul className="mt-2 space-y-1 text-xs opacity-75">
                 {open.tagHistory.map((h, i) => (
                   <li key={i}>
-                    · {new Date(h.at).toLocaleString("es-CO")} — {h.tag} por {h.by}
+                    · {new Date(h.at).toLocaleString("es-CO")}: {h.tag} por {h.by}
                   </li>
                 ))}
                 {open.shipment?.statusHistory.map((h, i) => (
                   <li key={`s${i}`}>
-                    · {new Date(h.at).toLocaleString("es-CO")} — paquete {h.status} por {h.by}
+                    · {new Date(h.at).toLocaleString("es-CO")}: paquete {h.status} por {h.by}
                   </li>
                 ))}
               </ul>

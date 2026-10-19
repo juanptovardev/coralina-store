@@ -91,7 +91,7 @@ export default function ClientesPage() {
     <div>
       <PageHeader
         title="Clientes"
-        subtitle="Paginación en servidor (50 por página), búsqueda con retardo y segmentos: VIP ≥ $50.000, recurrentes ≥ 2 pedidos, sin compras."
+        subtitle="50 por página, búsqueda con retardo y tres segmentos: VIP desde $50.000 de LTV, recurrentes con 2 o más pedidos, y quienes todavía no compran."
         actions={
           <a className="dash-btn" href="/api/admin/customers?format=csv">
             Exportar CSV
@@ -102,7 +102,7 @@ export default function ClientesPage() {
       {/* Stats globales (sin filtros) */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Clientes" value={String(stats?.total ?? 0)} hint="en la base" />
-        <Stat label="VIP" value={String(stats?.vip ?? 0)} hint="LTV ≥ $50.000" />
+        <Stat label="VIP" value={String(stats?.vip ?? 0)} hint="LTV desde $50.000" />
         <Stat label="Recurrentes" value={String(stats?.recurrentes ?? 0)} hint="2+ pedidos" />
         <Stat label="LTV promedio" value={formatCOP(stats?.avgLtvCents ?? 0)} hint="por cliente" />
       </div>

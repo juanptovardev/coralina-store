@@ -17,11 +17,17 @@ const NAV: { href: string; label: string; icon: ReactNode; group: string }[] = [
   { href: "/admin/promos", label: "Promos y combos", group: "Crecimiento", icon: <IconPercent /> },
   { href: "/admin/diseno", label: "Diseño del home", group: "Crecimiento", icon: <IconLayout /> },
 
-  { href: "/admin/usuarios", label: "Personas", group: "Control", icon: <IconUsers /> },
+  { href: "/admin/usuarios", label: "Cuentas", group: "Control", icon: <IconUsers /> },
   { href: "/admin/auditoria", label: "Auditoría", group: "Control", icon: <IconShield /> },
 ];
 
 const GROUPS = ["Operación", "Catálogo", "Crecimiento", "Control"];
+
+const ROLE_LABEL: Record<string, string> = {
+  admin: "Administrador",
+  asesor: "Asesor",
+  cliente: "Cliente",
+};
 
 export function AdminShell({ actor, children }: { actor: Actor; children: ReactNode }) {
   const pathname = usePathname();
@@ -118,11 +124,11 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
           <p className="mt-1 text-xs font-medium text-white">{actor.name}</p>
           <p className="mt-0.5 text-[0.65rem] leading-snug text-white/45">
             {actor.canHardDelete
-              ? "Borrado definitivo y purga habilitados."
-              : "Solo acciones suaves: archivar y cancelar."}
+              ? "Puede eliminar definitivamente y purgar la bitácora."
+              : "Opciones suaves: archivar y cancelar."}
           </p>
-          <div className="mt-2 rounded-lg bg-white/8 px-2 py-1 text-center text-[0.66rem] font-semibold capitalize text-white/70">
-            {actor.role}
+          <div className="mt-2 rounded-lg bg-white/8 px-2 py-1 text-center text-[0.66rem] font-semibold text-white/70">
+            {ROLE_LABEL[actor.role] ?? actor.role}
           </div>
           <button
             onClick={logout}
@@ -134,7 +140,7 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
             href="/"
             className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/15 px-2 py-1.5 text-[0.7rem] font-semibold text-white/75 transition hover:border-[var(--d-gold)] hover:text-white"
           >
-            ↗ Ver la tienda
+            Ver la tienda
           </Link>
         </div>
       </aside>
@@ -153,13 +159,13 @@ export function AdminShell({ actor, children }: { actor: Actor; children: ReactN
             <p className="text-[0.6rem] font-bold tracking-[0.18em] text-[var(--d-ink-soft)] uppercase">
               Coralina · Consola de operación
             </p>
-            <p className="truncate text-sm font-semibold">{current?.label ?? "Dashboard"}</p>
+            <p className="truncate text-sm font-semibold">{current?.label ?? "Resumen"}</p>
           </div>
           <span className="dash-pill hidden bg-[var(--d-accent-soft)] text-[var(--d-accent)] sm:inline-flex">
-            {actor.role}
+            {ROLE_LABEL[actor.role] ?? actor.role}
           </span>
           <Link href="/" className="dash-btn hidden sm:inline-flex">
-            Ver tienda ↗
+            Ver tienda
           </Link>
         </header>
         <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>

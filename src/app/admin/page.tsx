@@ -6,21 +6,21 @@ import { categoryStockSummary, getActiveLayout, listProducts } from "@/lib/queri
 import { buildOrderMetrics } from "@/lib/metrics";
 import { formatCOP, LAYOUT_PLANE, OPERATIONAL_TAGS, type LayoutMode } from "@/lib/constants";
 import { readBanner } from "@/lib/design";
+import { getActor } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminHome() {
-  const [layout, products, stock, allOrders, metrics, board] = await Promise.all([
+  const [layout, products, stock, allOrders, metrics, board, actor] = await Promise.all([
     getActiveLayout(),
     listProducts(),
     categoryStockSummary(),
     db.select().from(orders).orderBy(desc(orders.createdAt)).limit(300),
     // Métricas (KPIs + byTag + barras 14 días): fuente única compartida con
-    // /api/admin/orders — agregados SQL en ventanas UTC (buildOrderMetrics).
-    // Reemplaza el dayRows SQL y los KPIs SQL que vivían acá (dos impls
-    // divergentes); la semántica de números ahora es idéntica en ambos lados.
+    // /api/admin/orders — agregados SQL con cortes de día de Bogotá (UTC-5).
     buildOrderMetrics(),
     db.select().from(shipments),
+    getActor(),
   ]);
 
   // server component async: corre una vez por request; "hoy" lo usa hourAgo (envíos +24h)
@@ -48,9 +48,23 @@ export default async function AdminHome() {
     .filter((x): x is string => Boolean(x))
     .slice(0, 3);
 
-  /* Barras de los últimos 14 días naturales UTC (fuente única: lib/metrics) */
+  /* Barras de los últimos 14 días naturales de Bogotá (fuente única: lib/metrics) */
   const byDay = metrics.byDay;
   const maxDay = Math.max(1, ...byDay.map((d) => d.count));
+
+  /* Encabezado: fecha real de Bogotá y la carga pendiente del día */
+  const fecha = new Intl.DateTimeFormat("es-CO", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Bogota",
+  }).format(new Date(now));
+  const firstName = actor.name?.trim().split(/\s+/)[0] || "equipo";
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const pendientesHoy = [
+    porRevisar > 0 ? plural(porRevisar, "pedido sin confirmar", "pedidos sin confirmar") : null,
+    lowStock > 0 ? plural(lowStock, "talla bajo umbral", "tallas bajo umbral") : null,
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -63,12 +77,14 @@ export default async function AdminHome() {
         </svg>
         <div className="relative">
           <p className="text-[0.6rem] font-bold tracking-[0.24em] text-[var(--d-gold)] uppercase">
-            Consola de operación
+            {fecha} · Bogotá
           </p>
-          <h1 className="d-title mt-1.5 text-3xl text-white">Buen día, Coralina</h1>
+          <h1 className="d-title mt-1.5 text-3xl text-white">Hola, {firstName}</h1>
           <p className="mt-2 max-w-2xl text-[0.85rem] leading-relaxed text-white/65">
-            Mover el banner, crear tallas, armar un combo o cambiar el home se hace con clics. El sistema
-            mantiene los invariantes: stock, estados, envíos, layout activo y bitácora.
+            {pendientesHoy.length
+              ? `Hoy tienes ${pendientesHoy.join(" y ")}.`
+              : "Hoy no hay pedidos sin confirmar ni tallas bajo umbral."}{" "}
+            Las cifras se cortan a medianoche de Bogotá.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href="/admin/pedidos" className="dash-btn dash-btn-primary">
@@ -86,59 +102,67 @@ export default async function AdminHome() {
         <KPI
           label="Pedidos hoy"
           value={String(metrics.today)}
-          hint={`${metrics.prevDay} el día anterior`}
+          hint={`Ayer: ${metrics.prevDay}`}
           trend={metrics.today >= metrics.prevDay ? "up" : "down"}
         />
         <KPI
           label="Pedidos del mes"
           value={String(metrics.month)}
-          hint={`${formatCOP(metrics.revenueMonth)} facturados`}
+          hint={`${formatCOP(metrics.revenueMonth)} vendidos desde el día 1`}
         />
-        <KPI label="Ticket promedio" value={formatCOP(metrics.avgTicket)} hint="Pedidos no cancelados" />
         <KPI
-          label="Variantes bajo umbral"
+          label="Ticket promedio"
+          value={formatCOP(metrics.avgTicket)}
+          hint="Histórico de la tienda, sin cancelados"
+        />
+        <KPI
+          label="Tallas bajo umbral"
           value={String(lowStock)}
-          hint={lowStock ? "Requiere reposición" : "Inventario saludable"}
+          hint={lowStock ? "Necesitan reposición" : "Todas por encima del umbral"}
           trend={lowStock > 0 ? "down" : "up"}
         />
       </div>
 
-      {/* ---------- necesita atención (v4) ---------- */}
+      {/* ---------- lo que pide acción ahora ---------- */}
       <div className="dash-panel p-5">
         <div className="flex items-center justify-between">
-          <p className="dash-label">Necesita atención</p>
-          <span className="text-[0.68rem] text-[var(--d-ink-soft)]">clic para abrir</span>
+          <p className="dash-label">Para resolver hoy</p>
+          <span className="text-[0.68rem] text-[var(--d-ink-soft)]">Abre la lista ya filtrada</span>
         </div>
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <Link
             href="/admin/pedidos?tag=por_revisar"
             className="group rounded-lg border border-[var(--d-line)] bg-[var(--d-panel-2)] p-4 transition hover:border-[var(--d-accent)]"
           >
-            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">Por revisar</p>
+            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">Sin confirmar</p>
             <p className="d-title mt-1 text-3xl text-[var(--d-accent)]">{porRevisar}</p>
             <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">
-              pedidos sin confirmar → lista filtrada
+              {porRevisar === 0
+                ? "Ninguno espera confirmación"
+                : "Pedidos que esperan tu confirmación"}
             </p>
           </Link>
           <Link
             href="/admin/envios"
             className="group rounded-lg border border-[var(--d-line)] bg-[var(--d-panel-2)] p-4 transition hover:border-[var(--d-accent)]"
           >
-            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">En Revisión +24h</p>
+            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">En revisión hace más de 24 h</p>
             <p className="d-title mt-1 text-3xl text-[var(--d-warn)]">{staleShipments.length}</p>
             <p className="mono mt-1 truncate text-[0.68rem] text-[var(--d-ink-soft)]">
-              {staleCodes.length ? staleCodes.join(" · ") : "ninguno atrasado"}
+              {staleCodes.length ? staleCodes.join(" · ") : "Ninguno atrasado"}
             </p>
           </Link>
           <Link
             href="/admin/inventario"
             className="group rounded-lg border border-[var(--d-line)] bg-[var(--d-panel-2)] p-4 transition hover:border-[var(--d-accent)]"
           >
-            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">Stock en riesgo</p>
+            <p className="text-[0.7rem] font-semibold text-[var(--d-ink-soft)]">Tallas por reponer</p>
             <p className="d-title mt-1 text-3xl" style={{ color: "#2f6b5e" }}>
               {lowStock}
             </p>
-            <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">variantes bajo umbral → inventario</p>
+            <p className="mt-1 text-[0.68rem] text-[var(--d-ink-soft)]">
+              {lowStock === 0 ? "Todo por encima del umbral" : "Variantes por debajo del umbral"}
+            </p>
           </Link>
         </div>
       </div>
@@ -146,7 +170,7 @@ export default async function AdminHome() {
       <div className="grid gap-5 xl:grid-cols-3">
         {/* ---------- capas de estado ---------- */}
         <div className="dash-panel p-5 xl:col-span-2">
-          <p className="dash-label">Tres capas de estado · nunca se mezclan</p>
+          <p className="dash-label">Tres estados distintos de un pedido</p>
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <StateCard
               title="Estado comercial"
@@ -171,10 +195,8 @@ export default async function AdminHome() {
             />
           </div>
           <p className="mt-4 rounded-lg bg-[var(--d-panel-2)] p-3 text-[0.76rem] leading-relaxed text-[var(--d-ink-soft)]">
-            Un pedido web nace con clase <strong className="text-[var(--d-ink)]">enviar</strong>, tag{" "}
-            <strong className="text-[var(--d-ink)]">por revisar</strong> y su tarjeta en{" "}
-            <strong className="text-[var(--d-ink)]">Revisión</strong>. Uno manual marcado{" "}
-            <strong className="text-[var(--d-ink)]">no enviar</strong> nunca aparece en el tablero.
+            Un pedido que entra por la web llega como enviar, con la etiqueta por revisar y una tarjeta
+            en Revisión. Si lo registras a mano como no enviar, no aparece en el tablero de envíos.
           </p>
         </div>
 
@@ -223,7 +245,7 @@ export default async function AdminHome() {
       {/* ---------- barras 14 días (v4) ---------- */}
       <div className="dash-panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="dash-label">Pedidos · últimos 14 días</p>
+          <p className="dash-label">Pedidos por día · últimos 14 días (Bogotá)</p>
           <p className="text-[0.7rem] text-[var(--d-ink-soft)]">
             total {byDay.reduce((a, d) => a + d.count, 0)} ·{" "}
             {formatCOP(byDay.reduce((a, d) => a + d.revenueCents, 0))}
@@ -310,18 +332,18 @@ export default async function AdminHome() {
       <div className="grid gap-4 md:grid-cols-3">
         <QuickCard
           href="/admin/envios"
-          title={`${inRevision} en Revisión · ${activeBoard} en el tablero`}
-          text="Arrastra las tarjetas entre columnas. El job de 24h archiva los completados."
+          title={`${inRevision} en revisión · ${activeBoard} en el tablero`}
+          text="Arrastra las tarjetas entre columnas. Los completados se archivan solos a las 24 horas."
         />
         <QuickCard
           href="/admin/productos"
           title={`${products.length} productos · ${products.filter((p) => p.status === "published").length} publicados`}
-          text="Crear uno genera variantes, SKU e inventario automáticamente."
+          text="Al crear uno se generan sus variantes, el SKU y el inventario."
         />
         <QuickCard
           href="/admin/auditoria"
           title="Bitácora al día"
-          text="Cada mutación queda registrada en lenguaje claro, con filtros y export CSV."
+          text="Cada cambio queda con autor, fecha y motivo. Se filtra y se exporta a CSV."
         />
       </div>
     </div>
@@ -399,9 +421,7 @@ function QuickCard({ href, title, text }: { href: string; title: string; text: s
       href={href}
       className="dash-panel group flex items-start gap-3 p-4 transition hover:border-[var(--d-accent)]"
     >
-      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--d-accent-soft)] text-[var(--d-accent)]">
-        →
-      </span>
+      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--d-accent)]" aria-hidden />
       <span>
         <span className="block text-[0.82rem] font-semibold">{title}</span>
         <span className="mt-1 block text-[0.74rem] leading-relaxed text-[var(--d-ink-soft)]">{text}</span>

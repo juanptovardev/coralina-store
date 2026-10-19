@@ -49,7 +49,7 @@ export function Stat({
               ? "var(--d-danger)"
               : trend === "up"
                 ? "var(--d-ok)"
-                : "linear-gradient(90deg,var(--d-accent),var(--d-gold))",
+                : "var(--d-accent)",
         }}
       />
       <p className="dash-label">{label}</p>
@@ -346,8 +346,8 @@ export function HardDeleteDialog({
     <Modal open={open} onClose={onClose} title={`Eliminar ${entityLabel}`} subtitle="Acción irreversible">
       {!canHardDelete ? (
         <div className="rounded-lg border border-[#b3261e]/35 bg-[#fdf0ee] p-4 text-[0.82rem] text-[var(--d-danger)]">
-          Tu rol <strong>Asesor</strong> no puede borrar definitivamente. Puedes archivar o cancelar. La API
-          responde <code className="mono">403</code> aunque se intente por fuera de la interfaz.
+          Tu rol no permite borrar definitivamente. Puedes archivar o cancelar. La API responde{" "}
+          <code className="mono">403</code> aunque se intente por fuera de la interfaz.
         </div>
       ) : (
         <div className="space-y-4 text-[0.85rem]">
