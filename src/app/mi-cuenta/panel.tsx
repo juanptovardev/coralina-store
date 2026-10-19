@@ -367,7 +367,7 @@ export function MiCuentaPanel() {
                 <div className="mt-5 rounded-xl border border-dashed border-[var(--d-line)] bg-[var(--d-panel-2)] p-6 text-center text-sm text-[var(--d-ink-soft)]">
                   Todavía no tienes pedidos.{" "}
                   <Link href="/coleccion" className="font-semibold text-[var(--d-accent)] underline-offset-2 hover:underline">
-                    Explora la colección
+                    Ver la colección
                   </Link>
                   .
                 </div>

@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { cn, fmtCLP } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { formatCOP, FREE_SHIPPING_CENTS } from "@/lib/constants";
 import { useStore, SizeChartModal, ProductCard, type CatalogProduct } from "./shop";
-import { WaveIcon, StarfishIcon, ShellIcon, ArrowIcon, BubblesPattern } from "./svgs";
+import { WaveIcon, StarfishIcon, ShellIcon, BubblesPattern } from "./svgs";
 
 type Chart = { unit: string; columns: { key: string; label: string }[]; rows: Record<string, unknown>[] } | null;
 
@@ -52,8 +53,8 @@ export function PDP({
 
   const accordions = [
     { key: "desc", label: "Descripción", body: product.description || "Diseño de la colección Verano 26." },
-    { key: "envio", label: "Envíos y cambios", body: "Despacho en 24–48 h hábiles. Envío gratis desde $30.000. Tienes 30 días para cambios sin preguntas: te enviamos la etiqueta de retorno." },
-    { key: "tejido", label: "Tejido y cuidado", body: "82% poliamida reciclada, 18% elastano. Protección UV50+, forro doble, secado rápido. Lavar a mano en frío, secar a la sombra." },
+    { key: "envio", label: "Envíos y cambios", body: `Despacho de 24 a 48 horas hábiles a toda Colombia. Envío gratis desde ${formatCOP(FREE_SHIPPING_CENTS)}.` },
+    { key: "tejido", label: "Tejido y cuidado", body: "Lavar a mano en agua fría y secar a la sombra. Evita el cloro y la secadora para que el color dure." },
   ];
 
   return (
@@ -82,8 +83,8 @@ export function PDP({
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-terracotta">{product.categoryName}</p>
             <h1 className="mt-2 font-display text-4xl italic leading-tight md:text-5xl">{product.name}</h1>
             <div className="mt-4 flex items-baseline gap-3">
-              <span className="text-2xl font-bold">{fmtCLP(product.price)}</span>
-              {product.compareAt && <span className="text-base text-ink/40 line-through">{fmtCLP(product.compareAt)}</span>}
+              <span className="text-2xl font-bold">{formatCOP(product.price)}</span>
+              {product.compareAt && <span className="text-base text-ink/40 line-through">{formatCOP(product.compareAt)}</span>}
             </div>
 
             {comboPct && (
@@ -96,7 +97,7 @@ export function PDP({
             {/* Tallas desde el SizeChart de la categoría */}
             <div className="mt-6">
               <div className="flex items-center justify-between">
-                <p className="label mb-0">Talla {variant && <span className="normal-case text-ink/40">— seleccionada: {variant.size}</span>}</p>
+                <p className="label mb-0">Talla {variant && <span className="normal-case text-ink/40">· {variant.size}</span>}</p>
                 <button onClick={() => setModal(true)} className="flex items-center gap-1.5 text-xs font-semibold text-terracotta underline-offset-2 hover:underline">
                   <ShellIcon className="h-4 w-4" /> Guía de tallas
                 </button>
@@ -137,14 +138,14 @@ export function PDP({
                 >+</button>
               </div>
               <button onClick={addClick} disabled={!variant || variant.stock === 0} className="btn-primary flex-1">
-                Agregar al carrito · {fmtCLP(product.price * qty)}
+                Agregar al carrito · {formatCOP(product.price * qty)}
               </button>
             </div>
 
             {/* Beneficios */}
             <ul className="mt-7 space-y-2.5 border-t border-ink/10 pt-5 text-[0.82rem] text-ink/70">
-              <li className="flex items-center gap-2.5"><WaveIcon className="h-4 w-4 text-terracotta" /> Envío gratis desde $30.000 · despacho 24–48 h</li>
-              <li className="flex items-center gap-2.5"><StarfishIcon className="h-4 w-4 text-terracotta" /> Cambio fácil por 30 días con etiqueta de retorno</li>
+              <li className="flex items-center gap-2.5"><WaveIcon className="h-4 w-4 text-terracotta" /> Envío gratis desde {formatCOP(FREE_SHIPPING_CENTS)} · despacho de 24 a 48 h</li>
+              <li className="flex items-center gap-2.5"><StarfishIcon className="h-4 w-4 text-terracotta" /> Guía de tallas por categoría para elegir bien</li>
               <li className="flex items-center gap-2.5"><ShellIcon className="h-4 w-4 text-terracotta" /> Pago seguro por referencia · Bold en preparación</li>
             </ul>
 
@@ -177,7 +178,7 @@ export function PDP({
                   <h2 className="mt-1 font-display text-2xl italic md:text-3xl">Le queda perfecto con</h2>
                 </div>
                 <Link href="/coleccion" className="flex items-center gap-2 text-sm font-semibold text-terracotta hover:gap-3 transition-all">
-                  Ver todo <ArrowIcon className="h-4 w-4" />
+                  Ver toda la colección
                 </Link>
               </div>
               <div className="mt-6 grid grid-cols-2 gap-5 md:grid-cols-4">

@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { cn, fmtCLP } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { formatCOP, FREE_SHIPPING_CENTS } from "@/lib/constants";
 import { evaluatePromos, type PromoLike } from "@/lib/domain";
 import { LogoMark, BagIcon, FishIcon, StarfishIcon, WaveIcon } from "./svgs";
 
@@ -334,7 +335,7 @@ export function Header({ categories }: { categories: { name: string; slug: strin
               aria-label="Abrir carrito"
             >
               <BagIcon className="h-5 w-5" />
-              {count > 0 && <span className="hidden pr-1 text-xs font-semibold lg:inline">{fmtCLP(subtotal)}</span>}
+              {count > 0 && <span className="hidden pr-1 text-xs font-semibold lg:inline">{formatCOP(subtotal)}</span>}
               {count > 0 && (
                 <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ct-primary)] px-1 text-[0.65rem] font-bold text-white">
                   {count}
@@ -421,7 +422,7 @@ export function CartDrawer() {
                           onClick={() => i.qty < i.maxStock && setQty(i.variantId, i.qty + 1)}
                         >+</button>
                       </div>
-                      <p className="text-sm font-semibold">{fmtCLP(i.price * i.qty)}</p>
+                      <p className="text-sm font-semibold">{formatCOP(i.price * i.qty)}</p>
                     </div>
                     {i.qty >= i.maxStock && <p className="mt-1 text-[0.68rem] text-terracotta">Máximo disponible por pedido</p>}
                   </div>
@@ -442,7 +443,7 @@ export function CartDrawer() {
                 {appliedPromo && (
                   <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-sea">
                     <StarfishIcon className="h-3.5 w-3.5 text-amber-brand" />
-                    “{appliedPromo.name}” se aplica automáticamente: −{fmtCLP(discount)}
+                    “{appliedPromo.name}” se aplica automáticamente: −{formatCOP(discount)}
                   </p>
                 )}
                 {promoNote && <p className="mt-2 text-xs text-terracotta">{promoNote}</p>}
@@ -452,11 +453,11 @@ export function CartDrawer() {
             <div className="border-t border-ink/10 bg-white/60 px-6 py-5">
               <FreeShippingBar total={total} />
               <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between text-ink/65"><span>Subtotal</span><span>{fmtCLP(subtotal)}</span></div>
+                <div className="flex justify-between text-ink/65"><span>Subtotal</span><span>{formatCOP(subtotal)}</span></div>
                 {discount > 0 && (
-                  <div className="flex justify-between font-medium text-sea"><span>Descuento ({appliedPromo?.name})</span><span>−{fmtCLP(discount)}</span></div>
+                  <div className="flex justify-between font-medium text-sea"><span>Descuento ({appliedPromo?.name})</span><span>−{formatCOP(discount)}</span></div>
                 )}
-                <div className="flex justify-between pt-1 text-base font-bold"><span>Total</span><span>{fmtCLP(total)}</span></div>
+                <div className="flex justify-between pt-1 text-base font-bold"><span>Total</span><span>{formatCOP(total)}</span></div>
               </div>
               <button
                 className="btn-primary mt-4 w-full"
@@ -473,7 +474,7 @@ export function CartDrawer() {
   );
 }
 
-export const FREE_SHIPPING = 30000;
+export const FREE_SHIPPING = FREE_SHIPPING_CENTS;
 
 export function FreeShippingBar({ total }: { total: number }) {
   const pct = Math.min(100, (total / FREE_SHIPPING) * 100);
@@ -482,7 +483,7 @@ export function FreeShippingBar({ total }: { total: number }) {
     <div className="mb-4">
       <p className="text-xs font-medium text-ink/70">
         {missing > 0 ? (
-          <>Te faltan <strong className="text-terracotta">{fmtCLP(missing)}</strong> para el <strong>envío gratis</strong></>
+          <>Te faltan <strong className="text-terracotta">{formatCOP(missing)}</strong> para el <strong>envío gratis</strong></>
         ) : (
           <span className="font-semibold text-sea">¡Tienes envío gratis! 🌊</span>
         )}
@@ -522,8 +523,8 @@ export function ProductCard({ product, index = 0 }: { product: CatalogProduct; i
         <div>
           <h3 className="font-display text-[1.05rem] italic leading-tight">{product.name}</h3>
           <p className="mt-0.5 flex items-baseline gap-2 text-sm">
-            <span className="font-semibold">{fmtCLP(product.price)}</span>
-            {product.compareAt && <span className="text-xs text-ink/40 line-through">{fmtCLP(product.compareAt)}</span>}
+            <span className="font-semibold">{formatCOP(product.price)}</span>
+            {product.compareAt && <span className="text-xs text-ink/40 line-through">{formatCOP(product.compareAt)}</span>}
           </p>
         </div>
       </div>
@@ -625,29 +626,9 @@ export function SizeChartModal({
 /* ------------------------------- Newsletter -------------------------------- */
 
 export function NewsletterForm() {
-  const [email, setEmail] = useState("");
-  const [done, setDone] = useState(false);
-  return done ? (
-    <div className="flex items-center gap-2 text-sm font-medium text-sea fade-up">
-      <WaveIcon className="h-5 w-5" /> ¡Lista! Tu 10% OFF va en camino a {email}.
-    </div>
-  ) : (
-    <form
-      className="flex w-full max-w-md flex-col gap-3 sm:flex-row"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (email.includes("@")) setDone(true);
-      }}
-    >
-      <input
-        type="email"
-        required
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="tu@correo.cl"
-        className="input flex-1 rounded-full bg-white/80 px-5"
-      />
-      <button type="submit" className="btn-primary whitespace-nowrap">Quiero mi 10% OFF</button>
-    </form>
+  return (
+    <p className="max-w-md text-sm font-light leading-relaxed text-ink/70">
+      Todavía no enviamos un boletín. Cuando abramos la lista de correo, el formulario aparecerá aquí.
+    </p>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { cn, fmtCLP } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { formatCOP } from "@/lib/constants";
 import { useStore, ProductCard, type CatalogProduct } from "./shop";
 import { ArrowIcon, StarfishIcon, BubblesPattern } from "./svgs";
 
@@ -218,10 +219,10 @@ export function ComboBuilder({
             <div>
               <p className="text-xs text-ink/55">Precio del set</p>
               <p className="flex items-baseline gap-2">
-                <span className="font-display text-3xl italic">{fmtCLP(price)}</span>
-                <span className="text-sm text-ink/40 line-through">{fmtCLP(full)}</span>
+                <span className="font-display text-3xl italic">{formatCOP(price)}</span>
+                <span className="text-sm text-ink/40 line-through">{formatCOP(full)}</span>
               </p>
-              <p className="text-xs font-semibold text-sea">Ahorras {fmtCLP(full - price)} · envío gratis incluido</p>
+              <p className="text-xs font-semibold text-sea">Ahorras {formatCOP(full - price)} frente a comprar las piezas por separado</p>
             </div>
             <button onClick={addCombo} disabled={!available} className="btn-primary !py-3.5">
               Agregar set al carrito <ArrowIcon className="h-4 w-4" />

@@ -5,8 +5,8 @@ import { Banner } from "./banner";
 import { NewsletterForm, type CatalogProduct } from "./shop";
 import { BestSellers, ComboBuilder } from "./home-client";
 import { resolveHref } from "@/lib/utils";
+import { formatCOP } from "@/lib/constants";
 import {
-  StarfishIcon,
   ShellIcon,
   WaveIcon,
   SunIcon,
@@ -35,10 +35,10 @@ function FallbackHero() {
 /** Franja de valor inmediatamente bajo el hero (conversión) */
 function ValueStrip() {
   const items = [
-    { Icon: SunIcon, title: "UV50+", text: "Protección certificada" },
-    { Icon: WaveIcon, title: "Secado rápido", text: "Del agua a la arena en minutos" },
-    { Icon: ShellIcon, title: "Tallas fieles", text: "Guía por categoría XS–L" },
-    { Icon: CoralIcon, title: "Hecho en Chile", text: "Poliamida 82% reciclada" },
+    { Icon: SunIcon, title: "Hecho en Colombia", text: "Confección local" },
+    { Icon: WaveIcon, title: "Secado rápido", text: "Tela liviana para el agua" },
+    { Icon: ShellIcon, title: "Guía de tallas", text: "Medidas por categoría antes de comprar" },
+    { Icon: CoralIcon, title: "Pago con referencia", text: "Transferencia y confirmación del equipo" },
   ];
   return (
     <section className="border-b border-ink/8">
@@ -78,7 +78,7 @@ function CategoriesSection({
           <h2 className="mt-2 font-display text-3xl italic md:text-[2.6rem]">Compra por categoría</h2>
         </div>
         <a href="/coleccion" className="hidden items-center gap-2 text-sm font-semibold text-terracotta transition-all hover:gap-3 sm:flex">
-          Ver todo <ArrowIcon className="h-4 w-4" />
+          Ver la colección completa
         </a>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-5">
@@ -99,7 +99,7 @@ function CategoriesSection({
                 <h3 className="font-display text-2xl italic text-linen md:text-3xl">{c.name}</h3>
                 <p className="mt-0.5 text-xs text-linen/75">{c.description}</p>
                 <div className="mt-3 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-sand">{items.length} piezas{from ? ` · desde $${from.toLocaleString("es-CL")}` : ""}</span>
+                  <span className="text-xs font-semibold text-sand">{items.length} piezas{from ? ` · desde ${formatCOP(from)}` : ""}</span>
                   <span className="flex h-9 w-9 items-center justify-center rounded-full bg-linen text-terracotta transition group-hover:bg-[var(--ct-primary)] group-hover:text-white">
                     <ArrowIcon className="h-4 w-4" />
                   </span>
@@ -127,15 +127,10 @@ function EditorialSection({ data }: { data: any }) {
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-terracotta">{data?.kicker || "Hecho para el oleaje"}</p>
-          <h2 className="mt-3 font-display text-3xl italic leading-tight md:text-[2.6rem]">{data?.title}</h2>
+          <h2 className="mt-3 font-display text-3xl italic leading-tight md:text-[2.6rem]">{data?.title || "Hecho para el agua"}</h2>
           <p className="mt-4 max-w-md text-sm font-light leading-relaxed text-ink/70">{data?.text}</p>
-          <ul className="mt-5 space-y-2.5 text-sm text-ink/75">
-            <li className="flex items-center gap-2.5"><WaveIcon className="h-4 w-4 text-terracotta" /> Patrón de movimiento: no se sube en la ola</li>
-            <li className="flex items-center gap-2.5"><ShellIcon className="h-4 w-4 text-terracotta" /> Recuperación elástica del 40% tras 100 lavados</li>
-            <li className="flex items-center gap-2.5"><StarfishIcon className="h-4 w-4 text-terracotta" /> Colores sólidos que resisten cloro y sal</li>
-          </ul>
           <a href={resolveHref(data?.ctaLink || "collection")} className="btn-primary mt-7">
-            {data?.ctaLabel || "Descubrir la colección"} <ArrowIcon className="h-4 w-4" />
+            {data?.ctaLabel || "Ver precios y tallas"}
           </a>
         </div>
       </div>
@@ -152,22 +147,17 @@ function TestimonialsSection({ data }: { data: any }) {
         <div className="flex flex-col items-center text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-terracotta">Directo de la orilla</p>
           <h2 className="mt-2 font-display text-3xl italic md:text-[2.6rem]">Lo que dice la marea</h2>
-          <p className="mt-3 flex items-center gap-2 text-sm text-ink/65">
-            <span className="tracking-[0.15em] text-amber-brand">★★★★★</span> 4,9 de 5 · 612 reseñas verificadas
-          </p>
         </div>
         <div className="mt-10 flex snap-x gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-3 md:gap-5 md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {items.map((t, i) => (
             <figure key={i} className="card w-[82%] shrink-0 snap-start p-6 md:w-auto fade-up" style={{ animationDelay: `${i * 100}ms` }}>
-              <span className="text-sm tracking-[0.15em] text-amber-brand">★★★★★</span>
-              <blockquote className="mt-3 font-display text-[1.08rem] italic leading-relaxed text-ink/85">“{t.text}”</blockquote>
+              <blockquote className="font-display text-[1.08rem] italic leading-relaxed text-ink/85">“{t.text}”</blockquote>
               <figcaption className="mt-4 flex items-center gap-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-terracotta/15 text-xs font-bold text-terracotta-dark">
                   {t.name.slice(0, 1)}
                 </span>
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/55">
                   {t.name} · {t.city}
-                  <span className="block text-[0.62rem] font-medium normal-case tracking-normal text-sea">✓ Compra verificada</span>
                 </span>
               </figcaption>
             </figure>
@@ -187,12 +177,13 @@ function NewsletterSection({ data }: { data: any }) {
       ))}
       <div className="relative mx-auto flex max-w-2xl flex-col items-center px-5 text-center">
         <WaveIcon className="h-8 w-8 text-terracotta float-slow" />
-        <h2 className="mt-4 font-display text-3xl italic md:text-[2.6rem]">{data?.title || "Únete a la mar"}</h2>
-        <p className="mt-3 max-w-md text-sm font-light text-ink/70">{data?.text}</p>
+        <h2 className="mt-4 font-display text-3xl italic md:text-[2.6rem]">{data?.title || "Novedades de Coralina"}</h2>
+        <p className="mt-3 max-w-md text-sm font-light text-ink/70">
+          {data?.text || "Aquí avisaremos las colecciones nuevas. Por ahora no hay una lista de correo activa."}
+        </p>
         <div className="mt-6 flex w-full justify-center">
           <NewsletterForm />
         </div>
-        <p className="mt-3 text-[0.68rem] text-ink/45">Sin spam. Te das de baja con un clic.</p>
       </div>
     </section>
   );

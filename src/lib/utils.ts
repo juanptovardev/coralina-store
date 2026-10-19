@@ -2,23 +2,21 @@ export function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-export const fmtCLP = (n: number) =>
-  new Intl.NumberFormat("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  }).format(n);
+const BOGOTA_DATE: Intl.DateTimeFormatOptions = {
+  day: "2-digit",
+  month: "short",
+  timeZone: "America/Bogota",
+};
 
 export function fmtDate(iso: string | Date) {
   const d = typeof iso === "string" ? new Date(iso) : iso;
-  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "short" });
+  return d.toLocaleDateString("es-CO", BOGOTA_DATE);
 }
 
 export function fmtDateTime(iso: string | Date) {
   const d = typeof iso === "string" ? new Date(iso) : iso;
-  return d.toLocaleDateString("es-CL", {
-    day: "2-digit",
-    month: "short",
+  return d.toLocaleDateString("es-CO", {
+    ...BOGOTA_DATE,
     hour: "2-digit",
     minute: "2-digit",
   });

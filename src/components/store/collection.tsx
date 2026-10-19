@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { formatCOP, FREE_SHIPPING_CENTS } from "@/lib/constants";
 import { ProductCard, type CatalogProduct } from "./shop";
 import { WaveIcon, StarfishIcon, ShellIcon, CoralIcon, BubblesPattern } from "./svgs";
 
@@ -44,7 +45,7 @@ export function Collection({
             </Chip>
           ))}
           <span className="ml-auto hidden items-center gap-1.5 text-xs text-ink/45 sm:flex">
-            <StarfishIcon className="h-3.5 w-3.5 text-amber-brand" /> Envío gratis desde $30.000
+            <StarfishIcon className="h-3.5 w-3.5 text-amber-brand" /> Envío gratis desde {formatCOP(FREE_SHIPPING_CENTS)}
           </span>
         </div>
 

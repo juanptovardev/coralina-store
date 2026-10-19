@@ -197,3 +197,6 @@ export function formatCOP(cents: number): string {
     maximumFractionDigits: 0,
   }).format(Math.round(cents / 100));
 }
+
+/** Umbral de envío gratis en céntimos: $250.000 COP. Único punto de verdad para toda la tienda. */
+export const FREE_SHIPPING_CENTS = 25_000_000;
