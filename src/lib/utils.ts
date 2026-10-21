@@ -131,9 +131,12 @@ export const KNOWN_ROUTES = [
 
 export function isKnown(href: string): boolean {
   if (/^https?:\/\//i.test(href)) return true;
-  if (href === "/") return true;
-  if (href.startsWith("/producto/")) return href.length > "/producto/".length;
-  return KNOWN_ROUTES.some((r) => r !== "/" && href.startsWith(r));
+  const path = href.split(/[?#]/)[0];
+  if (path === "/") return true;
+  if (path.startsWith("/producto/")) return path.length > "/producto/".length;
+  return KNOWN_ROUTES.some(
+    (r) => r !== "/" && r !== "/producto/" && (path === r || path.startsWith(r + "/")),
+  );
 }
 
 export function downloadCSV(filename: string, rows: Record<string, unknown>[]) {

@@ -71,6 +71,11 @@ ok(
 ok("una dirección externa es válida", isKnown("https://instagram.com/coralina"));
 ok("un producto sin slug no es un destino", !isKnown("/producto/"));
 ok("una colección filtrada es un destino", isKnown("/coleccion?cat=bikinis"));
+ok(
+  "un destino que solo empieza igual no es un destino",
+  !isKnown("/coleccion-mal") && !isKnown("/loginx") && !isKnown("/adminfoo"),
+);
+ok("una subruta de admin sí es un destino", isKnown("/admin/usuarios") && isKnown("/admin/diseno"));
 
 console.log("— el checklist de publicación bloquea destinos inexistentes —");
 const linksItem = (link: string) =>
@@ -83,6 +88,22 @@ ok("destino real: el checklist lo aprueba", linksItem("url:/coleccion")?.ok === 
 ok("producto con slug: el checklist lo aprueba", linksItem("product:bikini-verde")?.ok === true);
 ok("producto sin slug: el checklist lo rechaza", linksItem("product:")?.ok === false);
 ok("destino externo: el checklist lo aprueba", linksItem("url:https://instagram.com/coralina")?.ok === true);
+ok(
+  "un destino que parece existente pero no existe lo rechaza",
+  linksItem("url:/coleccion-mal")?.ok === false,
+);
+const twoBad = publishChecklist({
+  banner: { imageUrl: "hero.jpg", aspectRatio: 2.6, overlayOpacity: 0.3 },
+  widgets: [
+    { id: "w1", type: "cta_primary", enabled: true, props: { link: "url:/catalogo" } },
+    { id: "w2", type: "cta_secondary", enabled: true, props: { link: "url:/coleccion-mal" } },
+  ],
+} as unknown as Parameters<typeof publishChecklist>[0]).find((c) => c.id === "links");
+ok(
+  "el aviso lista todos los destinos rotos",
+  Boolean(twoBad?.hint.includes("/catalogo") && twoBad?.hint.includes("/coleccion-mal")),
+  twoBad?.hint ?? "",
+);
 
 console.log("— guard: ninguna ruta muerta en el código —");
 const SRC = fileURLToPath(new URL("../src", import.meta.url));

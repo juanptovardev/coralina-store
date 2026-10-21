@@ -34,13 +34,14 @@ export function publishChecklist(layout: {
   const hasImage = Boolean(readBanner(layout.banner).image);
   const title = widgets.find((w) => w.type === "title" && w.enabled);
   const cta = widgets.find((w) => w.type === "cta_primary" && w.enabled);
-  const badLink = widgets
+  const badLinks = widgets
     .filter((w) => w.enabled)
     .map((w) => {
       const link = String((w.props?.link as string) ?? "").trim();
       return { link, href: resolveHref(link) };
     })
-    .find((x) => x.link !== "" && !isKnown(x.href))?.href;
+    .filter((x) => x.link !== "" && !isKnown(x.href))
+    .map((x) => x.href);
   const overlay = banner.overlayOpacity ?? banner.overlay ?? 0;
 
   return [
@@ -66,9 +67,9 @@ export function publishChecklist(layout: {
     {
       id: "links",
       label: "Los destinos de los botones existen en la tienda",
-      ok: !badLink,
-      hint: badLink
-        ? `Ese destino no existe: ${badLink}. Usa /coleccion, /producto/<slug>, /checkout o una dirección https://`
+      ok: badLinks.length === 0,
+      hint: badLinks.length
+        ? `Esos destinos no existen: ${badLinks.join(", ")}. Usa /coleccion, /producto/<slug>, /checkout o una dirección https://`
         : "Usa una ruta interna o una dirección https://",
     },
   ];
