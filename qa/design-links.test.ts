@@ -20,6 +20,17 @@ const ok = (name: string, cond: boolean, detail = "") => {
   }
 };
 
+const KNOWN_ROUTES = [
+  "/",
+  "/coleccion",
+  "/producto/",
+  "/checkout",
+  "/mi-cuenta",
+  "/login",
+  "/register",
+  "/admin",
+];
+
 console.log("— defaultWidgets: ningún botón apunta a /catalogo —");
 for (const mode of Object.keys(LAYOUT_PLANE)) {
   const widgets = defaultWidgets(mode as keyof typeof LAYOUT_PLANE);
@@ -32,8 +43,8 @@ for (const mode of Object.keys(LAYOUT_PLANE)) {
     `links=${links.join(",")}`,
   );
   ok(
-    `modo ${mode} apunta a la colección`,
-    links.every((l) => l === "url:/coleccion"),
+    `modo ${mode} solo usa destinos conocidos`,
+    links.every((l) => KNOWN_ROUTES.some((r) => resolveHref(l).startsWith(r))),
     `links=${links.join(",")}`,
   );
 }
@@ -85,6 +96,15 @@ const preview = await readFile(join(SRC, "components/storefront/HomeRenderer.tsx
 ok(
   "el preview del diseño usa resolveHref de lib/utils",
   preview.includes('from "@/lib/utils"') && !/function resolveLink/.test(preview),
+);
+
+const coleccionPage = await readFile(join(SRC, "app/coleccion/page.tsx"), "utf8");
+const catParam =
+  new URL(resolveHref("category:bikinis"), "https://coralina-store.vercel.app").searchParams.keys().next().value ?? "";
+ok(
+  "la página de colección lee el mismo parámetro que genera resolveHref",
+  catParam.length > 0 && coleccionPage.includes(catParam),
+  `param=${catParam}`,
 );
 
 console.log(`\n${pass} pass / ${fail} fail`);

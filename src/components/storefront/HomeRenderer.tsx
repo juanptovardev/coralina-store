@@ -93,7 +93,7 @@ export function HomeRenderer({
   const overlayDir = align === "left" ? "to right" : align === "right" ? "to left" : "to top";
 
   const sections = (Array.isArray(layout.sections) ? layout.sections : []).filter((s) => s.enabled).sort((a, b) => a.order - b.order);
-  const featured = products.slice(0, compact ? 4 : 4);
+  const featured = products.slice(0, 4);
 
   return (
     <div className="w-full overflow-hidden">
@@ -466,6 +466,10 @@ export function HomeRenderer({
   );
 }
 
+function isLinkTarget(value: string): boolean {
+  return /^https?:\/\//i.test(value) || value.startsWith("/");
+}
+
 function FooterCol({ title, links }: { title: string; links: string[] }) {
   return (
     <div>
@@ -473,9 +477,13 @@ function FooterCol({ title, links }: { title: string; links: string[] }) {
       <ul className="mt-4 space-y-2.5 text-[0.8rem] opacity-70">
         {links.map((l) => (
           <li key={l}>
-            <Link href="/coleccion" className="transition hover:text-[var(--color-accent)] hover:opacity-100">
-              {l}
-            </Link>
+            {isLinkTarget(l) ? (
+              <Link href={l} className="transition hover:text-[var(--color-accent)] hover:opacity-100">
+                {l}
+              </Link>
+            ) : (
+              <span>{l}</span>
+            )}
           </li>
         ))}
       </ul>
