@@ -249,7 +249,7 @@ export function HomeRenderer({
                   {categories.slice(0, 4).map((c, i) => (
                     <Link
                       key={c.id}
-                      href={`/coleccion?cat=${c.slug}`}
+                      href={resolveHref(`category:${c.slug}`)}
                       className="lift group relative block overflow-hidden rounded-[1.4rem]"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -450,9 +450,22 @@ export function HomeRenderer({
                   ))}
                 </div>
               </div>
-              <FooterCol title="Tienda" links={["Bikinis", "Enterizos", "Salidas de playa", "Panty"]} />
-              <FooterCol title="Ayuda" links={["Guía de tallas", "Envíos y cambios", "Cuidado de la prenda", "Contacto"]} />
-              <FooterCol title="Legal" links={["Términos", "Privacidad", "Devoluciones"]} />
+              <FooterCol
+                title="Tienda"
+                items={
+                  categories.length > 0
+                    ? categories.map((c) => ({ label: c.name, href: resolveHref(`category:${c.slug}`) }))
+                    : [{ label: "Colección", href: resolveHref("collection") }]
+                }
+              />
+              <FooterCol
+                title="Ayuda"
+                items={["Guía de tallas", "Envíos y cambios", "Cuidado de la prenda", "Contacto"].map((label) => ({ label }))}
+              />
+              <FooterCol
+                title="Legal"
+                items={["Términos", "Privacidad", "Devoluciones"].map((label) => ({ label }))}
+              />
             </div>
             <WaveStrip className="mx-auto mt-12 h-3 max-w-[1400px] text-white/15" />
             <div className="mx-auto mt-5 flex max-w-[1400px] flex-wrap items-center justify-between gap-2 text-[0.68rem] opacity-55">
@@ -466,23 +479,19 @@ export function HomeRenderer({
   );
 }
 
-function isLinkTarget(value: string): boolean {
-  return /^https?:\/\//i.test(value) || value.startsWith("/");
-}
-
-function FooterCol({ title, links }: { title: string; links: string[] }) {
+function FooterCol({ title, items }: { title: string; items: { label: string; href?: string }[] }) {
   return (
     <div>
       <p className="kicker opacity-80">{title}</p>
       <ul className="mt-4 space-y-2.5 text-[0.8rem] opacity-70">
-        {links.map((l) => (
-          <li key={l}>
-            {isLinkTarget(l) ? (
-              <Link href={l} className="transition hover:text-[var(--color-accent)] hover:opacity-100">
-                {l}
+        {items.map((it) => (
+          <li key={it.label}>
+            {it.href ? (
+              <Link href={it.href} className="transition hover:text-[var(--color-accent)] hover:opacity-100">
+                {it.label}
               </Link>
             ) : (
-              <span>{l}</span>
+              <span>{it.label}</span>
             )}
           </li>
         ))}

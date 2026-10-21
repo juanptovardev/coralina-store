@@ -31,6 +31,9 @@ const KNOWN_ROUTES = [
   "/admin",
 ];
 
+const isKnown = (href: string) =>
+  KNOWN_ROUTES.some((r) => (r === "/" ? href === "/" : href.startsWith(r)));
+
 console.log("— defaultWidgets: ningún botón apunta a /catalogo —");
 for (const mode of Object.keys(LAYOUT_PLANE)) {
   const widgets = defaultWidgets(mode as keyof typeof LAYOUT_PLANE);
@@ -44,7 +47,7 @@ for (const mode of Object.keys(LAYOUT_PLANE)) {
   );
   ok(
     `modo ${mode} solo usa destinos conocidos`,
-    links.every((l) => KNOWN_ROUTES.some((r) => resolveHref(l).startsWith(r))),
+    links.every((l) => isKnown(resolveHref(l))),
     `links=${links.join(",")}`,
   );
 }
@@ -74,6 +77,11 @@ ok("vacío → /coleccion", resolveHref("") === "/coleccion");
 ok("category:bikinis → /coleccion?cat=bikinis", resolveHref("category:bikinis") === "/coleccion?cat=bikinis");
 ok("product:abc → /producto/abc", resolveHref("product:abc") === "/producto/abc");
 ok("url:/checkout → /checkout", resolveHref("url:/checkout") === "/checkout");
+ok(
+  "una ruta muerta no pasa la guarda de destinos",
+  !isKnown(resolveHref("url:/catalogo")) && !isKnown(resolveHref("url:/ofertas")),
+  `catalogo=${resolveHref("url:/catalogo")}`,
+);
 
 console.log("— guard: ninguna ruta muerta en el código —");
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
@@ -101,10 +109,12 @@ ok(
 const coleccionPage = await readFile(join(SRC, "app/coleccion/page.tsx"), "utf8");
 const catParam =
   new URL(resolveHref("category:bikinis"), "https://coralina-store.vercel.app").searchParams.keys().next().value ?? "";
+const pageParam =
+  coleccionPage.match(/searchParams[^)]*\{([^}]*)\}/)?.[1]?.match(/(\w+)\s*\??\s*:/)?.[1] ?? "";
 ok(
   "la página de colección lee el mismo parámetro que genera resolveHref",
-  catParam.length > 0 && coleccionPage.includes(catParam),
-  `param=${catParam}`,
+  catParam.length > 0 && pageParam === catParam,
+  `pagina=${pageParam} resolveHref=${catParam}`,
 );
 
 console.log(`\n${pass} pass / ${fail} fail`);
