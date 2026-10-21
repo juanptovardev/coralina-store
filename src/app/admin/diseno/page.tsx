@@ -308,7 +308,7 @@ export default function DisenoPage() {
                                 className="admin-input text-xs"
                                 value={String(w.props.link ?? "")}
                                 onChange={(e) => patchProps(w.id, { link: e.target.value })}
-                                placeholder="url:/catalogo · category:bikinis · product:handle"
+                                placeholder="url:/coleccion · category:bikinis · product:handle"
                               />
                             </>
                           )}

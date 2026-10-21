@@ -84,7 +84,7 @@ export function normalizeWidgets(raw: unknown, slide?: Record<string, any>): Wid
   const on = (v: unknown) => v !== false; // en v4 la ausencia significa activo
   const link = (v: unknown): string => {
     const val = typeof v === "string" ? v.trim() : "";
-    if (!val) return "url:/catalogo";
+    if (!val) return "url:/coleccion";
     if (/^(url:|product:|category:|collection:)/.test(val)) return val;
     if (val === "collection") return "url:/coleccion";
     if (/^https?:\/\//.test(val)) return `url:${val}`;

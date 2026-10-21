@@ -140,7 +140,7 @@ export function defaultWidgets(mode: LayoutMode): WidgetInstance[] {
       enabled: true,
       slot: "content_bottom",
       grid: { ...base, row: 4 },
-      props: { label: "Comprar ahora", link: "url:/catalogo" },
+      props: { label: "Comprar ahora", link: "url:/coleccion" },
       zIndex: 4,
     },
     {
@@ -149,7 +149,7 @@ export function defaultWidgets(mode: LayoutMode): WidgetInstance[] {
       enabled: true,
       slot: "content_bottom",
       grid: { ...base, row: 4 },
-      props: { label: "Ver colección", link: "url:/catalogo" },
+      props: { label: "Ver colección", link: "url:/coleccion" },
       zIndex: 4,
     },
     {
