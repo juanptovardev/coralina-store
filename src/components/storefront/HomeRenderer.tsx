@@ -485,7 +485,7 @@ function FooterCol({ title, items }: { title: string; items: { label: string; hr
       <p className="kicker opacity-80">{title}</p>
       <ul className="mt-4 space-y-2.5 text-[0.8rem] opacity-70">
         {items.map((it) => (
-          <li key={it.label}>
+          <li key={it.href ?? it.label}>
             {it.href ? (
               <Link href={it.href} className="transition hover:text-[var(--color-accent)] hover:opacity-100">
                 {it.label}

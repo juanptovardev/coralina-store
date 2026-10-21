@@ -1,5 +1,6 @@
 import type { BannerConfig, WidgetInstance } from "@/db/schema";
 import { BANNER_RATIO_MAX, BANNER_RATIO_MIN } from "./constants";
+import { isKnown, resolveHref } from "./utils";
 
 /**
  * Contraste estimado entre el texto blanco del hero y la foto del banner.
@@ -33,8 +34,13 @@ export function publishChecklist(layout: {
   const hasImage = Boolean(readBanner(layout.banner).image);
   const title = widgets.find((w) => w.type === "title" && w.enabled);
   const cta = widgets.find((w) => w.type === "cta_primary" && w.enabled);
-  const ctaLink = cta ? String((cta.props.link as string) ?? "") : "";
-  const linkOk = !cta || /^(url:\/|url:https?:\/\/|product:|category:|collection:)/.test(ctaLink);
+  const badLink = widgets
+    .filter((w) => w.enabled)
+    .map((w) => {
+      const link = String((w.props?.link as string) ?? "").trim();
+      return { link, href: resolveHref(link) };
+    })
+    .find((x) => x.link !== "" && !isKnown(x.href))?.href;
   const overlay = banner.overlayOpacity ?? banner.overlay ?? 0;
 
   return [
@@ -57,7 +63,14 @@ export function publishChecklist(layout: {
       ok: contrastOk(overlay),
       hint: "Sube el overlay de contraste (mín. ~24%) para que el texto blanco se lea.",
     },
-    { id: "links", label: "Enlaces de los CTA válidos", ok: linkOk, hint: "Usa una ruta interna o https://" },
+    {
+      id: "links",
+      label: "Los destinos de los botones existen en la tienda",
+      ok: !badLink,
+      hint: badLink
+        ? `Ese destino no existe: ${badLink}. Usa /coleccion, /producto/<slug>, /checkout o una dirección https://`
+        : "Usa una ruta interna o una dirección https://",
+    },
   ];
 }
 

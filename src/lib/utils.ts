@@ -118,6 +118,24 @@ export function resolveHref(link: string): string {
   return "/coleccion";
 }
 
+export const KNOWN_ROUTES = [
+  "/",
+  "/coleccion",
+  "/producto/",
+  "/checkout",
+  "/mi-cuenta",
+  "/login",
+  "/register",
+  "/admin",
+];
+
+export function isKnown(href: string): boolean {
+  if (/^https?:\/\//i.test(href)) return true;
+  if (href === "/") return true;
+  if (href.startsWith("/producto/")) return href.length > "/producto/".length;
+  return KNOWN_ROUTES.some((r) => r !== "/" && href.startsWith(r));
+}
+
 export function downloadCSV(filename: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return;
   const headers = Object.keys(rows[0]);

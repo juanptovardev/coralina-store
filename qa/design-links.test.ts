@@ -2,8 +2,8 @@
 // y que resolveHref traduzca los destinos del editor a rutas reales.
 // Correr: bun qa/design-links.test.ts
 import { defaultWidgets, LAYOUT_PLANE } from "../src/lib/constants";
-import { normalizeWidgets } from "../src/lib/design";
-import { resolveHref } from "../src/lib/utils";
+import { normalizeWidgets, publishChecklist } from "../src/lib/design";
+import { isKnown, resolveHref } from "../src/lib/utils";
 import { join } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -19,20 +19,6 @@ const ok = (name: string, cond: boolean, detail = "") => {
     console.log(`  FAIL - ${name} ${detail}`);
   }
 };
-
-const KNOWN_ROUTES = [
-  "/",
-  "/coleccion",
-  "/producto/",
-  "/checkout",
-  "/mi-cuenta",
-  "/login",
-  "/register",
-  "/admin",
-];
-
-const isKnown = (href: string) =>
-  KNOWN_ROUTES.some((r) => (r === "/" ? href === "/" : href.startsWith(r)));
 
 console.log("— defaultWidgets: ningún botón apunta a /catalogo —");
 for (const mode of Object.keys(LAYOUT_PLANE)) {
@@ -82,6 +68,21 @@ ok(
   !isKnown(resolveHref("url:/catalogo")) && !isKnown(resolveHref("url:/ofertas")),
   `catalogo=${resolveHref("url:/catalogo")}`,
 );
+ok("una dirección externa es válida", isKnown("https://instagram.com/coralina"));
+ok("un producto sin slug no es un destino", !isKnown("/producto/"));
+ok("una colección filtrada es un destino", isKnown("/coleccion?cat=bikinis"));
+
+console.log("— el checklist de publicación bloquea destinos inexistentes —");
+const linksItem = (link: string) =>
+  publishChecklist({
+    banner: { imageUrl: "hero.jpg", aspectRatio: 2.6, overlayOpacity: 0.3 },
+    widgets: [{ id: "w1", type: "cta_primary", enabled: true, props: { link } }],
+  } as unknown as Parameters<typeof publishChecklist>[0]).find((c) => c.id === "links");
+ok("destino inexistente: el checklist lo marca", linksItem("url:/catalogo")?.ok === false);
+ok("destino real: el checklist lo aprueba", linksItem("url:/coleccion")?.ok === true);
+ok("producto con slug: el checklist lo aprueba", linksItem("product:bikini-verde")?.ok === true);
+ok("producto sin slug: el checklist lo rechaza", linksItem("product:")?.ok === false);
+ok("destino externo: el checklist lo aprueba", linksItem("url:https://instagram.com/coralina")?.ok === true);
 
 console.log("— guard: ninguna ruta muerta en el código —");
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
@@ -110,7 +111,7 @@ const coleccionPage = await readFile(join(SRC, "app/coleccion/page.tsx"), "utf8"
 const catParam =
   new URL(resolveHref("category:bikinis"), "https://coralina-store.vercel.app").searchParams.keys().next().value ?? "";
 const pageParam =
-  coleccionPage.match(/searchParams[^)]*\{([^}]*)\}/)?.[1]?.match(/(\w+)\s*\??\s*:/)?.[1] ?? "";
+  coleccionPage.match(/searchParams:\s*Promise<\{([^}]*)\}/)?.[1]?.match(/(\w+)\s*\??\s*:/)?.[1] ?? "";
 ok(
   "la página de colección lee el mismo parámetro que genera resolveHref",
   catParam.length > 0 && pageParam === catParam,
