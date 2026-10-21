@@ -4,6 +4,9 @@
 import { defaultWidgets, LAYOUT_PLANE } from "../src/lib/constants";
 import { normalizeWidgets } from "../src/lib/design";
 import { resolveHref } from "../src/lib/utils";
+import { join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 let pass = 0;
 let fail = 0;
@@ -60,6 +63,29 @@ ok("vacío → /coleccion", resolveHref("") === "/coleccion");
 ok("category:bikinis → /coleccion?cat=bikinis", resolveHref("category:bikinis") === "/coleccion?cat=bikinis");
 ok("product:abc → /producto/abc", resolveHref("product:abc") === "/producto/abc");
 ok("url:/checkout → /checkout", resolveHref("url:/checkout") === "/checkout");
+
+console.log("— guard: ninguna ruta muerta en el código —");
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
+async function sourceFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await sourceFiles(p)));
+    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(p);
+  }
+  return out;
+}
+const dead: string[] = [];
+for (const f of await sourceFiles(SRC)) {
+  if ((await readFile(f, "utf8")).includes("/catalogo")) dead.push(f.replace(SRC, "src"));
+}
+ok("src sin /catalogo", dead.length === 0, dead.join(", "));
+
+const preview = await readFile(join(SRC, "components/storefront/HomeRenderer.tsx"), "utf8");
+ok(
+  "el preview del diseño usa resolveHref de lib/utils",
+  preview.includes('from "@/lib/utils"') && !/function resolveLink/.test(preview),
+);
 
 console.log(`\n${pass} pass / ${fail} fail`);
 if (fail > 0) process.exit(1);

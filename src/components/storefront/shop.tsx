@@ -219,9 +219,9 @@ export function Header({ categories }: { categories: { name: string; slug: strin
             </Link>
           </div>
           <nav className="hidden items-center gap-7 text-[0.8rem] font-medium uppercase tracking-[0.14em] text-ink/75 md:flex">
-            <Link href="/catalogo" className="transition hover:text-terracotta">Colección</Link>
+            <Link href="/coleccion" className="transition hover:text-terracotta">Colección</Link>
             {categories.map((c) => (
-              <Link key={c.slug} href={`/catalogo?categoria=${c.slug}`} className="transition hover:text-terracotta">
+              <Link key={c.slug} href={`/coleccion?cat=${c.slug}`} className="transition hover:text-terracotta">
                 {c.name}
               </Link>
             ))}
@@ -264,9 +264,9 @@ export function Header({ categories }: { categories: { name: string; slug: strin
               <button onClick={() => setMenu(false)} className="text-2xl leading-none text-ink/50" aria-label="Cerrar menú">×</button>
             </div>
             <nav className="flex flex-col gap-1 p-4 text-sm font-semibold uppercase tracking-[0.14em]">
-              <Link onClick={() => setMenu(false)} href="/catalogo" className="rounded-xl px-3 py-3 hover:bg-sand/40">Toda la colección</Link>
+              <Link onClick={() => setMenu(false)} href="/coleccion" className="rounded-xl px-3 py-3 hover:bg-sand/40">Toda la colección</Link>
               {categories.map((c) => (
-                <Link key={c.slug} onClick={() => setMenu(false)} href={`/catalogo?categoria=${c.slug}`} className="rounded-xl px-3 py-3 hover:bg-sand/40">
+                <Link key={c.slug} onClick={() => setMenu(false)} href={`/coleccion?cat=${c.slug}`} className="rounded-xl px-3 py-3 hover:bg-sand/40">
                   {c.name}
                 </Link>
               ))}
@@ -303,7 +303,7 @@ export function CartDrawer() {
           <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
             <FishIcon className="float-slow h-12 w-12 text-terracotta/50" />
             <p className="text-sm text-ink/60">Tu carrito está esperando la marea.</p>
-            <button className="btn-primary" onClick={() => { setDrawerOpen(false); router.push("/catalogo"); }}>
+            <button className="btn-primary" onClick={() => { setDrawerOpen(false); router.push("/coleccion"); }}>
               Explorar la colección
             </button>
           </div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { BannerConfig, SectionInstance, WidgetInstance } from "@/db/schema";
 import { LAYOUT_PLANE, formatCOP, type LayoutMode } from "@/lib/constants";
 import { readBanner } from "@/lib/design";
+import { resolveHref } from "@/lib/utils";
 import {
   BENEFIT_ICONS,
   CoralFan,
@@ -43,14 +44,6 @@ export type HomeLayoutData = {
   widgets: WidgetInstance[];
   sections: SectionInstance[];
 };
-
-function resolveLink(link: unknown): string {
-  const raw = typeof link === "string" ? link : "";
-  if (raw.startsWith("url:")) return raw.slice(4);
-  if (raw.startsWith("product:")) return `/producto/${raw.slice(8)}`;
-  if (raw.startsWith("category:")) return `/catalogo?categoria=${raw.slice(9)}`;
-  return "/catalogo";
-}
 
 function colStyle(w: WidgetInstance, compact: boolean) {
   if (compact) return { gridColumn: "1 / span 12", textAlign: w.grid.align } as React.CSSProperties;
@@ -169,13 +162,13 @@ export function HomeRenderer({
                 className={`rise mt-7 flex flex-wrap items-center gap-3 ${justify}`}
               >
                 {cta1 && (
-                  <Link href={resolveLink(cta1.props.link)} className="btn-primary text-sm">
+                  <Link href={resolveHref(String(cta1.props.link ?? ""))} className="btn-primary text-sm">
                     {String(cta1.props.label ?? "Comprar")}
                     <span aria-hidden>→</span>
                   </Link>
                 )}
                 {cta2 && (
-                  <Link href={resolveLink(cta2.props.link)} className="btn-ghost text-sm text-white">
+                  <Link href={resolveHref(String(cta2.props.link ?? ""))} className="btn-ghost text-sm text-white">
                     {String(cta2.props.label ?? "Ver más")}
                   </Link>
                 )}
@@ -256,7 +249,7 @@ export function HomeRenderer({
                   {categories.slice(0, 4).map((c, i) => (
                     <Link
                       key={c.id}
-                      href={`/catalogo?categoria=${c.slug}`}
+                      href={`/coleccion?cat=${c.slug}`}
                       className="lift group relative block overflow-hidden rounded-[1.4rem]"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -303,7 +296,7 @@ export function HomeRenderer({
                   ))}
                 </div>
                 <div className="mt-12 text-center">
-                  <Link href="/catalogo" className="btn-primary text-sm">
+                  <Link href="/coleccion" className="btn-primary text-sm">
                     Ver toda la colección <span aria-hidden>→</span>
                   </Link>
                 </div>
@@ -480,7 +473,7 @@ function FooterCol({ title, links }: { title: string; links: string[] }) {
       <ul className="mt-4 space-y-2.5 text-[0.8rem] opacity-70">
         {links.map((l) => (
           <li key={l}>
-            <Link href="/catalogo" className="transition hover:text-[var(--color-accent)] hover:opacity-100">
+            <Link href="/coleccion" className="transition hover:text-[var(--color-accent)] hover:opacity-100">
               {l}
             </Link>
           </li>
