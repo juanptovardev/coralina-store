@@ -1,15 +1,27 @@
 node_modules/
 .next/
+out/
+build/
+coverage/
+
+# Env: nunca el local, siempre el ejemplo
 .env
 .env*.local
+.env*
 !.env.example
+
+# Artefactos
 *.tsbuildinfo
 *.log
 *.err
-*.pid
-.vercel
-public/uploads/products/
-.DS_Store
-.env*
-
 *.out
+*.pid
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel
+
+# Uploads de runtime (en produccion van a storage, no a git)
+public/uploads/products/*
+!public/uploads/products/.gitkeep

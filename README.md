@@ -1,66 +1,169 @@
 # Coralina Store
 
-Tienda e-commerce (Next.js 15 · App Router) con **storefront** y **panel de administración** (pedidos, envíos, catálogo, inventario, clientes, promociones, auditoría).
+Tienda en linea de trajes de bano hechos a mano en Colombia. Incluye tienda publica,
+carrito y checkout, cuenta de cliente y un panel de administracion completo
+(catalogo, inventario, pedidos, envios, clientes, promociones, diseno del home y equipo).
 
-- **Stack:** Next 15.5.27 · React 19 · TypeScript · Tailwind 4 · Drizzle ORM + `pg` (PostgreSQL).
-- **Storefront:** `/`, `/coleccion`, `/producto/[slug]`, `/checkout`.
-- **Admin:** `/admin` (protegido). Login selector de rol + clave de admin.
+- Produccion: https://coralina-store.vercel.app
+- Repo: privado (GitHub, cuenta juanptovardev)
 
----
+## Stack
+
+| Pieza | Version |
+| --- | --- |
+| Next.js (App Router) | 15.5.x |
+| React | 19.2.x |
+| TypeScript | 5.9.x |
+| Drizzle ORM + `pg` | 0.45.x |
+| Postgres | Neon (serverless) |
+| Estilos | Tailwind CSS 4 |
+| Tests | `bun` (runner propio) + CI en GitHub Actions |
+| Deploy | Vercel |
 
 ## Requisitos
 
-- Node.js 20+ y npm.
-- [Bun](https://bun.sh) 1+ — **solo para los tests** (`npm test` ejecuta `bun qa/*.test.ts`).
-- Un PostgreSQL (local o gestionado: Vercel Postgres/Neon, Supabase, etc.).
+- Node.js 22 (ver `.nvmrc`)
+- Bun, solo para correr los tests
+- Una base de datos Postgres. Opcional: Docker local (`coralina-postgres`, DB `coralina_v6`)
+
+## Arranque
+
+```powershell
+npm install
+Copy-Item .env.example .env.local
+# completa DATABASE_URL y CORALINA_SESSION_SECRET en .env.local
+npm run dev
+```
+
+Abre http://localhost:3000
 
 ## Variables de entorno
 
-Crea un `.env` (local) o configúralas en el host. Ver `.env.example`.
+Estan documentadas en `.env.example`. En produccion se configuran en Vercel
+(Settings > Environment Variables).
 
-| Variable | Obligatoria | Descripción |
-| --- | --- | --- |
-| `DATABASE_URL` | ✅ | Cadena de conexión PostgreSQL (`postgresql://user:pass@host:5432/db`). |
-| `NEXT_PUBLIC_SITE_URL` | – | URL pública del sitio. |
-| `CORALINA_ADMIN_PASSWORD` | ✅ en producción | Clave para acciones destructivas y login admin. **Sin default seguro en prod.** |
-| `CORALINA_SESSION_SECRET` | ✅ en producción | Secreto HMAC que firma la cookie de sesión del admin. |
-| `TRUST_PROXY` | ✅ en producción | `1` para confiar en `x-real-ip`/`x-forwarded-for` detrás de Vercel (rate-limit por IP). |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | – | Límite de peticiones por IP (default 30 / 60000 ms). |
-| `RATE_LIMIT_ALLOW_LOCAL` | – | `1` exime loopback del rate-limit (solo QA local). |
-| `SESSION_UNSIGNED` | – | `1` usa cookies sin firmar (solo QA local; avisa en prod). |
+Las dos obligatorias:
 
-> El esquema (15 tablas) se aplica con Drizzle; los datos semilla se crean solos (`ensureSeeded`) en el primer request.
+- `DATABASE_URL`: cadena de Postgres.
+- `CORALINA_SESSION_SECRET`: firma de las cookies de sesion. Sin ella, produccion
+  no autentica (fail-closed) y devuelve 401.
 
-## Desarrollo local
+`CORALINA_ADMIN_PASSWORD` habilita las acciones destructivas (borrado duro, purga de
+la bitacora) y nunca debe existir en el cliente.
 
-```bash
-npm install
-npx drizzle-kit push        # crea/actualiza el esquema en DATABASE_URL
-npm run dev                 # http://localhost:3000
+## Scripts
+
+| Comando | Que hace |
+| --- | --- |
+| `npm run dev` | Servidor de desarrollo |
+| `npm run build` | Build de produccion |
+| `npm run start` | Sirve el build |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Todos los `qa/*.test.ts` (descubre archivos, falla si alguno cae) |
+| `npm run verify` | typecheck + test + build (lo que debe pasar antes de un push) |
+
+Los tests corren con `bun`. Si no esta en el PATH, en Windows:
+`C:\Users\<usuario>\AppData\Local\Kiro-Cli\bun.exe`
+
+## Rutas
+
+Publicas
+
+- `/` home
+- `/coleccion` catalogo (filtro `?cat=<slug>`)
+- `/producto/[slug]` detalle
+- `/checkout` cierre de compra
+
+Cuenta
+
+- `/login`, `/register`
+- `/mi-cuenta` panel del cliente: perfil, mis pedidos, detalle, cambiar clave, repetir pedido
+
+Admin (requiere rol admin o asesor)
+
+- `/admin` resumen
+- `/admin/pedidos`, `/admin/envios`
+- `/admin/productos`, `/admin/categorias`, `/admin/inventario`
+- `/admin/clientes`, `/admin/promos`
+- `/admin/diseno` editor del home
+- `/admin/usuarios` cuentas del equipo (admin y asesor)
+- `/admin/auditoria`
+
+## Roles
+
+| Rol | Puede |
+| --- | --- |
+| `cliente` | Comprar, ver y editar su cuenta, ver sus pedidos |
+| `asesor` | Operar catalogo, pedidos, envios, clientes, promos. No gestiona cuentas ni borra duro |
+| `admin` | Todo, incluido cuentas y borrados definitivos |
+
+El login es correo y clave. El rol sale de la cuenta guardada, no del navegador.
+El registro publico crea siempre `cliente`.
+
+## Carga de catalogo
+
+1. Lee `docs/plantilla-carga-catalogo.md` (version en lenguaje llano).
+2. Usa las plantillas de Excel en `docs/hoja-carga/`.
+3. Carga las categorias con su guia de tallas, luego los productos, y al final publica el home.
+
+Reglas de dinero: los precios se guardan en centimos de COP y se formatean con
+`formatCOP` (`src/lib/constants.ts`). El umbral de envio gratis es unico:
+`FREE_SHIPPING_CENTS` ($250.000 COP).
+
+## Diseno
+
+`docs/design-system/` contiene la direccion (marca, dientes, paleta, tipografia),
+la memoria para el agente de diseno, la guia de estructuracion de contenido,
+`tokens.css` y un ejemplo de home lleno.
+
+## Verificacion antes de publicar
+
+```powershell
+npm run verify
 ```
 
-Scripts: `npm run build` · `npm run start` · `npm run typecheck` · `npm run lint` · `npm test` (requiere Bun).
+Y en produccion:
 
-## Deploy en Vercel
+```powershell
+curl.exe -s -o NUL -w "%%{http_code}`n" https://coralina-store.vercel.app/
+curl.exe -s -o NUL -w "%%{http_code}`n" https://coralina-store.vercel.app/coleccion
+curl.exe -s -o NUL -w "%%{http_code}`n" https://coralina-store.vercel.app/login
+```
 
-1. **Sube este repo a GitHub** (o conecta el repo existente).
-2. En Vercel: **Add New → Project → Import** el repo. Framework se detecta como **Next.js** automáticamente.
-3. **Crea la base de datos**: Vercel → *Storage → Create Database → Postgres* (o un proyecto Neon/Supabase). Copia su `DATABASE_URL`.
-4. **Environment Variables** (Production + Preview):
-   - `DATABASE_URL` = la cadena de tu Postgres.
-   - `TRUST_PROXY` = `1`
-   - `CORALINA_ADMIN_PASSWORD` = tu clave
-   - `CORALINA_SESSION_SECRET` = un string aleatorio largo
-5. **Deploy**.
-6. Aplica el esquema a la DB de producción: en local, con `DATABASE_URL` apuntando a la DB de Vercel, corre `npx drizzle-kit push`.
+## Limitaciones conocidas
 
-### ⚠️ Nota sobre Next 16
+- Los uploads de imagenes viven en el filesystem de la app. En serverless eso es
+  efimero y no sobrevive entre instancias. Falta storage externo (S3, R2, Blob).
+- El rate limit y el throttle de login estan en memoria: se reinician por instancia.
+  Sin Redis o Upstash no hay conteo compartido ni 429 garantizado.
+- Sin CSP con nonce (la app usa `unsafe-inline` para estilos y scripts propios).
+- El archivo automatico de pedidos a las 24 h se evalua cuando llega una peticion.
+  No hay cron, asi que un pedido puede archivarse con retraso.
+- El export de auditoria corta en 400 filas.
+- No hay avisos automaticos de pedido por correo ni WhatsApp.
+- El pago es por referencia manual (Bold aun no esta conectado).
+- No hay migraciones versionadas en `drizzle/`. El schema se aplica con scripts one-off
+  en `scripts/oneoff/`.
 
-Algunos builders de Vercel han fallado con Next **16.2.6** (el proyecto quedó fijado en **15.5.27** + `src/middleware.ts`) al generar el segmento RSC de la página global-error (`ENOENT … _global-error.segments/__PAGE__.segment.rsc.func`). Si el build remoto falla por esto, la vía más segura es fijar una versión de Next ya soportada por Vercel (p. ej. `next@15.5.x`) — lo que además requiere volver de `src/proxy.ts` a `src/middleware.ts`.
+## Estructura
 
-## Seguridad
+```
+v6
+├─ src/app            rutas (pubblico, cuenta, admin, api)
+├─ src/components     store, storefront (preview), admin, shared
+├─ src/db             schema y cliente Drizzle
+├─ src/lib            logica de dominio (orders, metrics, catalog, session, utils)
+├─ qa                 tests bun de las funciones puras y guards de codigo
+├─ docs
+│  ├─ design-system   direccion, memoria del agente, tokens
+│  ├─ engineering     proceso (orquestacion, batches, estado, trace)
+│  ├─ adr             decisiones de arquitectura
+│  └─ hoja-carga      plantillas CSV
+├─ scripts            one-off y utilidades operativas
+└─ tools/verifications dossiers de cierre por etapa
+```
 
-- Panel `/admin` protegido por cookie de sesión **firmada (HMAC)**; `/api/admin/*` es deny-by-default.
-- Rate-limit en las fronteras públicas (`/api/store`, `/api/cart/evaluate`) y en el login admin.
-- Cabeceras: CSP, HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`.
-- Nunca subas `.env` (está en `.gitignore`).
+## Licencia
+
+Codigo privado. Todos los derechos reservados.
