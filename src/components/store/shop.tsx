@@ -231,9 +231,9 @@ export function StoreProvider({
   }, [quoteSig, quote, items, promoCode, drawerOpen]);
 
   const serverOk = !!quote && quote.ok && quote.sig === quoteSig;
-  const subtotal = serverOk ? quote.subtotalCents / 100 : local.subtotal;
-  const discount = serverOk ? quote.discountCents / 100 : local.discount;
-  const total = serverOk ? quote.totalCents / 100 : local.total;
+  const subtotal = serverOk ? quote.subtotalCents : local.subtotal;
+  const discount = serverOk ? quote.discountCents : local.discount;
+  const total = serverOk ? quote.totalCents : local.total;
   const appliedPromo = serverOk
     ? quote.applied[0]
       ? promoFromQuote(quote.applied[0], local.applied)

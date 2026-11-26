@@ -48,8 +48,8 @@ export function Checkout() {
       setError("El carrito esta vacio.");
       return;
     }
-    if (!form.name.trim() || !form.phone.trim() || !form.city.trim() || !form.address.trim()) {
-      setError("Completa nombre, telefono, ciudad y direccion para poder enviar el pedido.");
+    if (!form.name.trim() || !form.email.trim() || !form.phone.trim() || !form.city.trim() || !form.address.trim()) {
+      setError("Completa nombre, correo, telefono, ciudad y direccion para poder enviar el pedido.");
       return;
     }
     setError("");
@@ -72,11 +72,12 @@ export function Checkout() {
         }),
       });
       const data = await response.json();
-      if (!response.ok || !data?.ok) {
+      if (!response.ok || !data?.code) {
         setError(String(data?.error ?? "No pudimos registrar el pedido. Intenta de nuevo."));
         return;
       }
 
+      const totalCents = Math.round(Number(data.total ?? total / 100) * 100);
       const lines = items.map(
         (item, index) =>
           index + 1 + ". " + item.name + " (talla " + item.size + ") x" + item.qty + " = " + formatCOP(item.price * item.qty),
@@ -91,7 +92,7 @@ export function Checkout() {
         "Subtotal: " + formatCOP(subtotal),
         discount > 0 ? "Descuento: -" + formatCOP(discount) : "",
         "Envio: " + (subtotal >= FREE_SHIPPING_CENTS ? "gratis" : "por confirmar"),
-        "Total: " + formatCOP(Number(data.total ?? total)),
+        "Total: " + formatCOP(totalCents),
         "",
         "Datos de envio:",
         "Nombre: " + form.name,
@@ -106,7 +107,7 @@ export function Checkout() {
 
       const wa = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent(text);
       clear();
-      setDone({ code: String(data.code), total: Number(data.total ?? total), wa });
+      setDone({ code: String(data.code), total: totalCents, wa });
       window.open(wa, "_blank", "noopener,noreferrer");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
@@ -266,7 +267,7 @@ export function Checkout() {
           </div>
           <div>
             <label className="text-sm font-medium text-ink" htmlFor="email">
-              Correo (opcional)
+              Correo
             </label>
             <input
               id="email"
@@ -276,6 +277,7 @@ export function Checkout() {
               onChange={(event) => update("email", event.target.value)}
               placeholder="maria@correo.com"
               autoComplete="email"
+              required
             />
           </div>
           <div>

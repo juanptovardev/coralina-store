@@ -63,8 +63,8 @@ export const getCatalog = cache(async () => {
       id: String(p.id),
       name: p.title,
       slug: p.handle,
-      price: p.priceCents / 100,
-      compareAt: p.compareAtCents == null ? null : p.compareAtCents / 100,
+      price: p.priceCents,
+      compareAt: p.compareAtCents == null ? null : p.compareAtCents,
       image: images[0] ?? "",
       featured: tags.includes("featured"),
       description: p.description,
@@ -113,7 +113,7 @@ export const getCatalog = cache(async () => {
         if (!cids.length) return [];
         const benefit =
           p.type === "category_amount"
-            ? { kind: "fixed" as const, value: p.amountCents / 100 }
+            ? { kind: "fixed" as const, value: p.amountCents }
             : { kind: "pct" as const, value: p.percent };
         if (cids.length > 1) {
           // v4 combo (varias categorías): se emite type "combo" para el display
@@ -182,7 +182,7 @@ export const getCatalog = cache(async () => {
             scope: {
               requires: cids.map((id) => ({ category: slugOf(id), min: 1 })),
               minQty: p.minQty,
-              comboPrice: (p.comboPriceCents ?? 0) / 100,
+              comboPrice: (p.comboPriceCents ?? 0),
             },
             benefit: { kind: "pct" as const, value: p.percent },
           },
@@ -194,10 +194,10 @@ export const getCatalog = cache(async () => {
           {
             ...base,
             type: "qty",
-            scope: { minQty: p.minQty, minAmount: p.minSubtotalCents / 100 },
+            scope: { minQty: p.minQty, minAmount: p.minSubtotalCents },
             benefit:
               p.amountCents > 0
-                ? { kind: "fixed" as const, value: p.amountCents / 100 }
+                ? { kind: "fixed" as const, value: p.amountCents }
                 : { kind: "pct" as const, value: p.percent },
           },
         ];

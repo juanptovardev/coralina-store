@@ -220,7 +220,7 @@ export function MiCuentaPanel() {
           size: it.size,
           sku: it.sku,
           image: cur.image,
-          price: cur.priceCents / 100,
+          price: cur.priceCents,
           qty: it.quantity,
           maxStock: cur.stock,
         };
