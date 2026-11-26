@@ -38,7 +38,7 @@ function ValueStrip() {
     { Icon: SunIcon, title: "Hecho en Colombia", text: "Confección local" },
     { Icon: WaveIcon, title: "Secado rápido", text: "Tela liviana para el agua" },
     { Icon: ShellIcon, title: "Guía de tallas", text: "Medidas por categoría antes de comprar" },
-    { Icon: CoralIcon, title: "Pago con referencia", text: "Transferencia y confirmación del equipo" },
+    { Icon: CoralIcon, title: "Pedido por WhatsApp", text: "Carrito y datos listos para enviar" },
   ];
   return (
     <section className="border-b border-ink/8">

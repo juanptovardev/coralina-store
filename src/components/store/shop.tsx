@@ -269,7 +269,7 @@ export function StoreProvider({
 
 const ANNOUNCEMENTS = [
   `Envío gratis desde ${formatCOP(FREE_SHIPPING_CENTS)} en Colombia`,
-  "Pago con referencia segura",
+  "Pedido por WhatsApp",
   "Hecho en Colombia",
 ];
 

@@ -146,7 +146,7 @@ export function PDP({
             <ul className="mt-7 space-y-2.5 border-t border-ink/10 pt-5 text-[0.82rem] text-ink/70">
               <li className="flex items-center gap-2.5"><WaveIcon className="h-4 w-4 text-terracotta" /> Envío gratis desde {formatCOP(FREE_SHIPPING_CENTS)} · despacho de 24 a 48 h</li>
               <li className="flex items-center gap-2.5"><StarfishIcon className="h-4 w-4 text-terracotta" /> Guía de tallas por categoría para elegir bien</li>
-              <li className="flex items-center gap-2.5"><ShellIcon className="h-4 w-4 text-terracotta" /> Pago seguro por referencia · Bold en preparación</li>
+              <li className="flex items-center gap-2.5"><ShellIcon className="h-4 w-4 text-terracotta" /> Pedido por WhatsApp · sin pasarela de pago</li>
             </ul>
 
             {/* Acordeones */}
